@@ -152,16 +152,18 @@ func (cli *CLI) ExecuteCommand(input string) {
 		return
 	}
 
-	// 1. First: structured syntax commands that contain -> (for loops, etc.)
+	// ── 1. Structured / script-like syntaxes (highest priority) ───────────────
+
+	// for ... in ... -> ...
 	if strings.HasPrefix(input, "for ") &&
 		strings.Contains(input, " in ") &&
 		strings.Contains(input, " -> ") {
-
 		cli.executeForLoop(input)
 		return
 	}
 
-	// 2. Special prefixes: #proxychains and #sudo → run original command via idle executor with prefix
+	// #proxychains cmd
+	// #sudo cmd
 	if strings.HasPrefix(input, "#proxychains ") || strings.HasPrefix(input, "#sudo ") {
 		prefix := ""
 		cmdPart := ""
@@ -175,35 +177,28 @@ func (cli *CLI) ExecuteCommand(input string) {
 		}
 
 		if cmdPart == "" {
-			core.PrintError("Missing command after #" + prefix[:len(prefix)-1])
+			core.PrintError("Missing command after " + prefix[:len(prefix)-1])
 			return
 		}
 
-		// The REAL command we want to run in background/idle mode
-		innerCommand := cmdPart
-
-		// Build the wrapper that uses idle-exec
 		wrapper := fmt.Sprintf(
 			`%s~/bin/lanmanvan -modules ~/lanmanvan/modules -idle-exec -idle-cmd %q`,
 			prefix,
-			innerCommand,
+			cmdPart,
 		)
 
-		core.PrintInfo("Executing in background/idle mode with prefix:")
+		core.PrintInfo("Executing in background/idle mode:")
 		fmt.Printf("  → %s\n\n", wrapper)
 
-		// Run the wrapper via shell (this should now work)
 		cli.ExecuteShellCommand(wrapper)
 		return
 	}
 
-	// 3. Output redirection > and >>  (only after special syntaxes!)
-	// We check for space before > or >> to reduce false positives
+	// Output redirection > and >>
 	if strings.Contains(input, " > ") || strings.Contains(input, " >> ") ||
 		(strings.HasSuffix(input, ">") && !strings.HasSuffix(input, "->")) ||
-		(strings.HasSuffix(input, ">>")) {
+		strings.HasSuffix(input, ">>") {
 
-		// Find the LAST occurrence of > or >>
 		greaterPos := strings.LastIndex(input, ">>")
 		if greaterPos == -1 {
 			greaterPos = strings.LastIndex(input, ">")
@@ -238,13 +233,29 @@ func (cli *CLI) ExecuteCommand(input string) {
 		}
 	}
 
-	// 4. Pipes |>
-	if strings.Contains(input, "|>") {
-		cli.executePipedCommands(input)
+	// ── 2. Simple built-in printing commands ──────────────────────────────────
+
+	if strings.HasPrefix(input, "echo ") ||
+		strings.HasPrefix(input, "print ") {
+
+		content := ""
+		if strings.HasPrefix(input, "echo ") {
+			content = strings.TrimSpace(input[5:])
+		} else {
+			content = strings.TrimSpace(input[6:])
+		}
+
+		// Minimal expansion - only if you want CLI variables shown immediately
+		// (most people prefer letting real shell handle echo $VAR)
+		// content = cli.expandVariables(content)
+
+		fmt.Println(content)
 		return
 	}
 
-	// 5. Environment variable set/view (key=value or key=?)
+	// ── 3. Variable operations ────────────────────────────────────────────────
+
+	// VAR=value  or  VAR=?
 	if strings.Contains(input, "=") && !strings.Contains(input, " ") {
 		parts := strings.SplitN(input, "=", 2)
 		if len(parts) == 2 {
@@ -253,12 +264,9 @@ func (cli *CLI) ExecuteCommand(input string) {
 
 			if value == "?" {
 				if val, exists := cli.envMgr.Get(key); exists {
-					fmt.Println()
-					fmt.Printf("   %s = %s\n", core.Color("cyan", key), core.Color("green", val))
-					fmt.Println()
+					fmt.Printf("  %s = %s\n", core.Color("cyan", key), core.Color("green", val))
 				} else {
 					core.PrintWarning(fmt.Sprintf("Variable '%s' not set", key))
-					fmt.Println()
 				}
 				return
 			}
@@ -268,98 +276,113 @@ func (cli *CLI) ExecuteCommand(input string) {
 				return
 			}
 
-			fmt.Println()
 			core.PrintSuccess(fmt.Sprintf("Set %s = %s", key, value))
-			fmt.Println()
 			return
 		}
 	}
 
-	// 6. Shell command ($ prefix)
+	// ── 4. Direct shell execution with $ prefix ───────────────────────────────
+
 	if strings.HasPrefix(input, "$") {
-		cli.ExecuteShellCommand(input)
+		realCmd := strings.TrimSpace(input[1:])
+		cli.ExecuteShellCommand(realCmd)
 		return
 	}
 
-	// 7. Regular commands / modules
+	// ── 5. Built-in commands & module execution ───────────────────────────────
+
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return
 	}
 
-	cmd := parts[0]
+	cmdName := parts[0]
 	args := parts[1:]
 
-	switch cmd {
+	switch cmdName {
 	case "help", "h", "?":
 		cli.PrintHelp()
-	case "list", "ls":
+
+	case "list", "ls", "modules":
 		cli.ListModules()
+
+	case "search":
+		if len(args) == 0 {
+			core.PrintError("Usage: search <keyword>")
+			return
+		}
+		cli.SearchModules(strings.Join(args, " "))
+
+	case "info":
+		if len(args) == 0 {
+			core.PrintError("Usage: info <module>")
+			return
+		}
+		cli.ShowModuleInfo(args[0], 1)
+
+	case "run":
+		if len(args) == 0 {
+			core.PrintError("Usage: run <module> [args...]")
+			return
+		}
+		cli.RunModule(args[0], args[1:])
+
+	case "create", "new":
+		if len(args) == 0 {
+			core.PrintError("Usage: create <name> [python|bash|go]")
+			return
+		}
+		cli.CreateModule(args[0], args[1:])
+
+	case "edit":
+		if len(args) == 0 {
+			core.PrintError("Usage: edit <module>")
+			return
+		}
+		cli.EditModule(args[0])
+
+	case "delete", "rm", "remove":
+		if len(args) == 0 {
+			core.PrintError("Usage: delete <module>")
+			return
+		}
+		cli.DeleteModule(args[0])
+
 	case "env", "envs":
 		cli.envMgr.Display()
-	case "search":
-		if len(args) > 0 {
-			cli.SearchModules(strings.Join(args, " "))
-		} else {
-			core.PrintError("Usage: search <keyword>")
-		}
-	case "info":
-		if len(args) > 0 {
-			cli.ShowModuleInfo(args[0], 1)
-		} else {
-			core.PrintError("Usage: info <module>")
-		}
-	case "run":
-		if len(args) > 0 {
-			cli.RunModule(args[0], args[1:])
-		} else {
-			core.PrintError("Usage: run <module> [args...]")
-		}
-	case "create", "new":
-		if len(args) > 0 {
-			cli.CreateModule(args[0], args[1:])
-		} else {
-			core.PrintError("Usage: create <name> [python|bash]")
-		}
-	case "edit":
-		if len(args) > 0 {
-			cli.EditModule(args[0])
-		} else {
-			core.PrintError("Usage: edit <module>")
-		}
-	case "delete", "remove", "rm":
-		if len(args) > 0 {
-			cli.DeleteModule(args[0])
-		} else {
-			core.PrintError("Usage: delete <module>")
-		}
+
 	case "history":
 		cli.PrintHistory()
+
 	case "clear", "cls":
 		cli.ClearScreen()
+
 	case "refresh", "reload":
 		cli.RefreshModules()
+
 	case "exit", "quit", "q":
 		cli.running = false
 		fmt.Println()
 		core.PrintSuccess("Goodbye! See you next time.")
-		fmt.Println()
 		return
 
 	default:
-		// Quick module info: module!
-		if strings.HasSuffix(cmd, "!") {
-			moduleName := strings.TrimSuffix(cmd, "!")
+		// Quick info: module!
+		if strings.HasSuffix(cmdName, "!") {
+			moduleName := strings.TrimSuffix(cmdName, "!")
 			cli.ShowModuleInfo(moduleName, 0)
-		} else {
-			// Try to run as module
-			if cli.RunModule(cmd, args) == false {
-				cli.ExecuteShellCommand(input)
-				return
-			}
+			return
+		}
+
+		// Try as module first → fallback to system shell
+		if !cli.RunModule(cmdName, args) {
+			cli.ExecuteShellCommand(input)
 		}
 	}
 }
+
+// ExecuteShellCommand runs the command through the real shell,
+// allowing full shell syntax: $VAR, ${VAR}, $(command), `cmd`, *, ~, &&, ||, etc.
 
 // GetModuleManager returns the module manager instance
 func (cli *CLI) GetModuleManager() *core.ModuleManager {
@@ -483,7 +506,7 @@ func (cli *CLI) executeForLoop(input string) {
 		expanded := regexp.MustCompile(`\$\{`+regexp.QuoteMeta(varName)+`\}|\$`+regexp.QuoteMeta(varName)).
 			ReplaceAllString(command, value)
 
-		fmt.Printf("  [%3d/%3d] → %s\n", count, total, expanded)
+		//fmt.Printf("  [%3d/%3d] → %s\n", count, total, expanded)
 
 		var result string
 		if strings.Contains(expanded, "|>") {
@@ -496,7 +519,7 @@ func (cli *CLI) executeForLoop(input string) {
 		}
 	}
 
-	if len(results) > 0 {
+	if true {
 		fmt.Println()
 		core.PrintSuccess("Collected results (" + string(len(results)) + "):")
 		for i, res := range results {

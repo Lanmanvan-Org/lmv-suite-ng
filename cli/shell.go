@@ -55,7 +55,7 @@ func (cli *CLI) ExecuteShellCommand(input string) {
 
 	startTime := time.Now()
 	fmt.Println()
-	core.PrintInfo(fmt.Sprintf("Executing in %s", core.Color("cyan", shell)))
+	//core.PrintInfo(fmt.Sprintf("Executing in %s", core.Color("cyan", shell)))
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -87,7 +87,7 @@ func (cli *CLI) ExecuteShellCommand(input string) {
 
 	fmt.Println()
 	if err == nil {
-		core.PrintSuccess(fmt.Sprintf("Command completed in %s", duration.String()))
+		//core.PrintSuccess(fmt.Sprintf("Command completed in %s", duration.String()))
 	} else {
 		core.PrintError(fmt.Sprintf("Command failed: %v (%s)", err, duration.String()))
 	}
