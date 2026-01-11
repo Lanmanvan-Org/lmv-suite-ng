@@ -16,11 +16,11 @@ import (
 
 // RunModule executes a module with provided arguments
 // RunModule executes a module with provided arguments
-func (cli *CLI) RunModule(moduleName string, args []string) {
+func (cli *CLI) RunModule(moduleName string, args []string) bool {
 	module, err := cli.manager.GetModule(moduleName)
 	if err != nil {
 		core.PrintError(fmt.Sprintf("%v", err))
-		return
+		return false
 	}
 
 	moduleArgs := make(map[string]string)
@@ -70,7 +70,7 @@ func (cli *CLI) RunModule(moduleName string, args []string) {
 
 			fmt.Printf("\n   Example Usage:\n")
 			fmt.Printf("      %s %s=value\n\n", moduleName, missing[0])
-			return
+			return true
 		}
 	}
 
@@ -111,7 +111,7 @@ func (cli *CLI) RunModule(moduleName string, args []string) {
 
 	if err != nil {
 		core.PrintError(fmt.Sprintf("%v", err))
-		return
+		return true
 	}
 
 	duration := time.Since(startTime)
@@ -144,6 +144,7 @@ func (cli *CLI) RunModule(moduleName string, args []string) {
 			"Failed in %s [exit: %d]", duration, result.ExitCode))
 	}
 	fmt.Println()
+	return true
 }
 
 // runModuleThreaded executes a module with multiple threads

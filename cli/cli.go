@@ -353,7 +353,10 @@ func (cli *CLI) ExecuteCommand(input string) {
 			cli.ShowModuleInfo(moduleName, 0)
 		} else {
 			// Try to run as module
-			cli.RunModule(cmd, args)
+			if cli.RunModule(cmd, args) == false {
+				cli.ExecuteShellCommand(input)
+				return
+			}
 		}
 	}
 }
