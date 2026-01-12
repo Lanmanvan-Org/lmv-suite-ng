@@ -1,0 +1,8 @@
+# Option 1 - Cleanest & most common
+.ignore/
+
+# Option 2 - Very explicit
+.ignore
+
+# Option 3 - Also ignores everything inside even if someone forces-add files
+.ignore/
