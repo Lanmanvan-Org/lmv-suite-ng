@@ -12,16 +12,29 @@ import (
 
 // GetPrompt returns the CLI prompt
 func (cli *CLI) GetPrompt() string {
-	user, _ := user.Current()
-	hostname, _ := os.Hostname()
+	username := "user"
+	hostname := "localhost"
 
-	// Simple, colorful prompt
-	return fmt.Sprintf("%s%s%s%s ",
-		color.CyanString(user.Username),
+	if u, err := user.Current(); err == nil && u != nil && u.Username != "" {
+		username = u.Username
+	}
+	if h, err := os.Hostname(); err == nil && h != "" {
+		hostname = h
+	}
+
+	basePrompt := fmt.Sprintf("%s%s%s%s",
+		color.CyanString(username),
 		color.WhiteString("@"),
 		color.MagentaString(hostname),
-		color.GreenString(" ❯"),
+		color.GreenString("❯"),
 	)
+
+	// Show current module if set
+	if cli.currentModule != "" {
+		return fmt.Sprintf("[%s] %s ", color.YellowString(cli.currentModule), basePrompt)
+	}
+
+	return basePrompt + " "
 }
 
 // PrintBanner prints a random application banner

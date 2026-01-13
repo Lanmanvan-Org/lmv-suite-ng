@@ -24,11 +24,9 @@ type CLI struct {
 	envMgr  *EnvironmentManager
 	logger  *Logger
 
-	//v1.5 #macros
-	macros        map[string]string
-	macroParams   map[string][]string
-	macroRequired map[string]map[string]bool
-	builtinMacros map[string]bool
+	// v1.5 more
+	currentModule   string
+	moduleVariables map[string]string
 }
 
 // NewCLI creates a new CLI instance
@@ -40,12 +38,14 @@ func NewCLI(modulesDir string) *CLI {
 		envMgr:  NewEnvironmentManager(),
 		logger:  NewLogger(),
 
-		//v1.5
-		macros:        make(map[string]string),
-		macroParams:   make(map[string][]string),
-		macroRequired: make(map[string]map[string]bool),
-		builtinMacros: make(map[string]bool),
+		// v1.5: currentModule starts as empty (no module selected)
+		currentModule:   "",
+		moduleVariables: make(map[string]string),
 	}
+}
+func (cli *CLI) moduleExists(name string) bool {
+	_, err := cli.manager.GetModule(name)
+	return err == nil
 }
 
 // Start begins the CLI loop
@@ -63,16 +63,6 @@ func (cli *CLI) Start(banner__ bool) error {
 	// v1.5
 
 	// In your CLI initialization (NewCLI or similar):
-	cli.macros = make(map[string]string)
-	cli.macroParams = make(map[string][]string)
-	cli.macroRequired = make(map[string]map[string]bool)
-	cli.builtinMacros = map[string]bool{
-		"echo":   true,
-		"if":     true,
-		"else":   true,
-		"define": true,
-		"def":    true,
-	}
 
 	// END v1.5
 
@@ -272,10 +262,6 @@ func (cli *CLI) ExecuteCommand(input string) {
 			content = strings.TrimSpace(input[6:])
 		}
 
-		// Minimal expansion - only if you want CLI variables shown immediately
-		// (most people prefer letting real shell handle echo $VAR)
-		// content = cli.expandVariables(content)
-
 		fmt.Println(content)
 		return
 	}
@@ -316,6 +302,23 @@ func (cli *CLI) ExecuteCommand(input string) {
 		return
 	}
 
+	// set / get
+
+	// ── 3b. @var → print module variable (only if module selected) ─────────────
+	if strings.HasPrefix(input, "@") && len(input) > 1 {
+		varName := strings.TrimSpace(input[1:])
+		if cli.currentModule == "" {
+			core.PrintError("No module selected. Use 'use <module>' first.")
+			return
+		}
+		if val, ok := cli.moduleVariables[varName]; ok {
+			fmt.Println(val)
+		} else {
+			core.PrintWarning(fmt.Sprintf("Variable '@%s' not set for current module.", varName))
+		}
+		return
+	}
+
 	// ── 5. Built-in commands & module execution ───────────────────────────────
 
 	parts := strings.Fields(input)
@@ -342,17 +345,110 @@ func (cli *CLI) ExecuteCommand(input string) {
 
 	case "info":
 		if len(args) == 0 {
-			core.PrintError("Usage: info <module>")
+			if cli.currentModule == "" {
+				core.PrintError("Usage: info <module>  OR  select a module with 'use <module>' and run 'info'")
+				return
+			}
+			// Show info for currently selected module
+			cli.ShowModuleInfo(cli.currentModule, 1)
 			return
 		}
+		// Show info for explicitly given module
 		cli.ShowModuleInfo(args[0], 1)
+		return
+
+	case "use":
+		if len(args) == 0 {
+			if cli.currentModule != "" {
+				core.PrintInfo(fmt.Sprintf("Currently using module: %s", core.Color("cyan", cli.currentModule)))
+			} else {
+				core.PrintInfo("No module currently selected.")
+			}
+			return
+		}
+
+		moduleName := args[0]
+
+		// Validate module exists
+		if !cli.moduleExists(moduleName) {
+			core.PrintError(fmt.Sprintf("Module '%s' not found. Use 'list' to see available modules.", moduleName))
+			return
+		}
+
+		cli.currentModule = moduleName
+		core.PrintSuccess(fmt.Sprintf("Using module: %s", core.Color("cyan", moduleName)))
+		return
+
+	case "set":
+		if cli.currentModule == "" {
+			core.PrintError("No module selected. Use 'use <module>' first.")
+			return
+		}
+
+		if len(args) == 0 {
+			// List all set variables for current module
+			if len(cli.moduleVariables) == 0 {
+				core.PrintInfo("No variables set for module '" + cli.currentModule + "'.")
+			} else {
+				core.PrintInfo("Variables for module '" + cli.currentModule + "':")
+				for k, v := range cli.moduleVariables {
+					fmt.Printf("  %s = %s\n", core.Color("cyan", k), core.Color("green", v))
+				}
+			}
+			return
+		}
+
+		if len(args) < 2 {
+			core.PrintError("Usage: set <name> <value>")
+			return
+		}
+
+		key := args[0]
+		value := strings.Join(args[1:], " ") // allow spaces in value
+
+		cli.moduleVariables[key] = value
+		core.PrintSuccess(fmt.Sprintf("Set %s = %s", core.Color("cyan", key), core.Color("green", value)))
+		return
 
 	case "run":
-		if len(args) == 0 {
-			core.PrintError("Usage: run <module> [args...]")
+		if cli.currentModule == "" {
+			core.PrintError("No module selected. Use 'use <module>' first, or run explicitly: run <module> [args...]")
 			return
 		}
-		cli.RunModule(args[0], args[1:])
+
+		// Build final args list: start with module defaults, then apply overrides
+		finalArgs := make([]string, 0)
+
+		// Add all current module variables as key=value
+		for k, v := range cli.moduleVariables {
+			finalArgs = append(finalArgs, k+"="+v)
+		}
+
+		// Override with command-line args (e.g., run url=...)
+		for _, arg := range args {
+			if strings.Contains(arg, "=") {
+				// Extract key to allow override
+				parts := strings.SplitN(arg, "=", 2)
+				key := parts[0]
+				// Remove existing key from finalArgs (to avoid duplicates)
+				newFinal := make([]string, 0)
+				for _, a := range finalArgs {
+					if !strings.HasPrefix(a, key+"=") {
+						newFinal = append(newFinal, a)
+					}
+				}
+				finalArgs = newFinal
+				// Add new override
+				finalArgs = append(finalArgs, arg)
+			} else {
+				// Not a key=value? Pass through (maybe your module supports positional args)
+				finalArgs = append(finalArgs, arg)
+			}
+		}
+
+		// Run the current module with merged args
+		cli.RunModule(cli.currentModule, finalArgs)
+		return
 
 	case "create", "new":
 		if len(args) == 0 {
@@ -394,7 +490,17 @@ func (cli *CLI) ExecuteCommand(input string) {
 		return
 
 	default:
-		// Quick info: module!
+		// Handle "!" -> show info for current module
+		if cmdName == "!" {
+			if cli.currentModule == "" {
+				core.PrintError("No active module selected. Use 'use <module>' first.")
+				return
+			}
+			cli.ShowModuleInfo(cli.currentModule, 0)
+			return
+		}
+
+		// Handle "modname!" -> show info for that module
 		if strings.HasSuffix(cmdName, "!") {
 			moduleName := strings.TrimSuffix(cmdName, "!")
 			cli.ShowModuleInfo(moduleName, 0)

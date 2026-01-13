@@ -20,32 +20,48 @@ func (cli *CLI) RunModule(moduleName string, args []string) bool {
 	module, err := cli.manager.GetModule(moduleName)
 	if err != nil {
 		core.PrintError(fmt.Sprintf("%v", err))
-		return false
+		return false // module not found → not handled
 	}
 
+	// Parse CLI-provided args (e.g., from 'run url=x')
+	parsedArgs := cli.parseArguments(args)
+
+	// Start building final module arguments
 	moduleArgs := make(map[string]string)
+
+	// 1. Load module-scoped variables (from 'set') — if this is the current module
+	if cli.currentModule == moduleName {
+		for k, v := range cli.moduleVariables {
+			moduleArgs[k] = v
+		}
+	}
+
+	// 2. Override with CLI args (e.g., run url=...)
+	for k, v := range parsedArgs {
+		moduleArgs[k] = v
+	}
+
+	// 3. Finally, fill in global env vars (lowest priority)
+	for k, v := range cli.envMgr.GetAll() {
+		if _, exists := moduleArgs[k]; !exists {
+			moduleArgs[k] = v
+		}
+	}
+
+	// Extract special control flags
 	threads := 1
 	saveLog := false
 
-	parsedArgs := cli.parseArguments(args)
-
-	for key, value := range parsedArgs {
-		switch key {
-		case "threads":
-			fmt.Sscanf(value, "%d", &threads)
-		case "save":
-			saveLog = value == "1" || value == "true" || value == "yes"
-		default:
-			moduleArgs[key] = value
-		}
+	if val, ok := moduleArgs["threads"]; ok {
+		fmt.Sscanf(val, "%d", &threads)
+		delete(moduleArgs, "threads") // don't pass to module logic
+	}
+	if val, ok := moduleArgs["save"]; ok {
+		saveLog = val == "1" || val == "true" || val == "yes"
+		delete(moduleArgs, "save")
 	}
 
-	for key, value := range cli.envMgr.GetAll() {
-		if _, exists := moduleArgs[key]; !exists {
-			moduleArgs[key] = value
-		}
-	}
-
+	// Validate required args
 	if module.Metadata != nil && len(module.Metadata.Required) > 0 {
 		missing := []string{}
 		for _, req := range module.Metadata.Required {
@@ -65,21 +81,24 @@ func (cli *CLI) RunModule(moduleName string, args []string) bool {
 			for _, opt := range missing {
 				if meta, ok := module.Metadata.Options[opt]; ok {
 					fmt.Printf("      * %s (%s) - %s\n", opt, meta.Type, meta.Description)
+				} else {
+					fmt.Printf("      * %s\n", opt)
 				}
 			}
 
 			fmt.Printf("\n   Example Usage:\n")
 			fmt.Printf("      %s %s=value\n\n", moduleName, missing[0])
-			return true
+			return true // handled (with error message), so return true to avoid shell fallback
 		}
 	}
 
+	// Enable logging if requested
 	if saveLog {
 		if err := cli.logger.EnableFileLogging(moduleName); err != nil {
 			core.PrintWarning(fmt.Sprintf("Could not enable file logging: %v", err))
 		}
+		defer cli.logger.Close()
 	}
-	defer cli.logger.Close()
 
 	startTime := time.Now()
 
@@ -102,19 +121,21 @@ func (cli *CLI) RunModule(moduleName string, args []string) bool {
 	defer cli.stopModuleExecution()
 
 	var result *core.ExecutionResult
+	var execErr error
 
 	if threads > 1 {
-		result, err = cli.runModuleThreaded(moduleName, moduleArgs, threads)
+		result, execErr = cli.runModuleThreaded(moduleName, moduleArgs, threads)
 	} else {
-		result, err = cli.manager.ExecuteModule(moduleName, moduleArgs)
-	}
-
-	if err != nil {
-		core.PrintError(fmt.Sprintf("%v", err))
-		return true
+		result, execErr = cli.manager.ExecuteModule(moduleName, moduleArgs)
 	}
 
 	duration := time.Since(startTime)
+
+	if execErr != nil {
+		core.PrintError(fmt.Sprintf("Execution failed: %v", execErr))
+		fmt.Println()
+		return true // handled
+	}
 
 	if result.Output != "" {
 		fmt.Println(core.NmapBox("Output"))
@@ -137,14 +158,13 @@ func (cli *CLI) RunModule(moduleName string, args []string) bool {
 	}
 
 	if result.Success {
-		core.PrintSuccess(fmt.Sprintf(
-			"Completed in %s [exit: %d]", duration, result.ExitCode))
+		core.PrintSuccess(fmt.Sprintf("Completed in %s [exit: %d]", duration, result.ExitCode))
 	} else {
-		core.PrintError(fmt.Sprintf(
-			"Failed in %s [exit: %d]", duration, result.ExitCode))
+		core.PrintError(fmt.Sprintf("Failed in %s [exit: %d]", duration, result.ExitCode))
 	}
 	fmt.Println()
-	return true
+
+	return true // successfully handled (even if module failed)
 }
 
 // runModuleThreaded executes a module with multiple threads
