@@ -43,6 +43,32 @@ func NewCLI(modulesDir string) *CLI {
 		moduleVariables: make(map[string]string),
 	}
 }
+
+// v1.5
+// expandGlobalVars replaces $VAR or ${VAR} with values from global envMgr
+func (cli *CLI) expandGlobalVars(input string) string {
+	// Handle $VAR (no braces)
+	reSimple := regexp.MustCompile(`\$([a-zA-Z_][a-zA-Z0-9_]*)`)
+	input = reSimple.ReplaceAllStringFunc(input, func(match string) string {
+		varName := match[1:] // skip '$'
+		if val, exists := cli.envMgr.Get(varName); exists {
+			return val
+		}
+		return match // leave unchanged if not found
+	})
+
+	// Handle ${VAR} (with braces)
+	reBraced := regexp.MustCompile(`\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
+	input = reBraced.ReplaceAllStringFunc(input, func(match string) string {
+		varName := match[2 : len(match)-1] // extract from ${...}
+		if val, exists := cli.envMgr.Get(varName); exists {
+			return val
+		}
+		return match
+	})
+
+	return input
+}
 func (cli *CLI) moduleExists(name string) bool {
 	_, err := cli.manager.GetModule(name)
 	return err == nil
@@ -305,6 +331,7 @@ func (cli *CLI) ExecuteCommand(input string) {
 	// set / get
 
 	// ── 3b. @var → print module variable (only if module selected) ─────────────
+
 	if strings.HasPrefix(input, "@") && len(input) > 1 {
 		varName := strings.TrimSpace(input[1:])
 		if cli.currentModule == "" {
@@ -314,7 +341,7 @@ func (cli *CLI) ExecuteCommand(input string) {
 		if val, ok := cli.moduleVariables[varName]; ok {
 			fmt.Println(val)
 		} else {
-			core.PrintWarning(fmt.Sprintf("Variable '@%s' not set for current module.", varName))
+			core.PrintWarning(fmt.Sprintf("Module variable '@%s' not set.", varName))
 		}
 		return
 	}
@@ -386,11 +413,11 @@ func (cli *CLI) ExecuteCommand(input string) {
 		}
 
 		if len(args) == 0 {
-			// List all set variables for current module
+			// List module variables
 			if len(cli.moduleVariables) == 0 {
 				core.PrintInfo("No variables set for module '" + cli.currentModule + "'.")
 			} else {
-				core.PrintInfo("Variables for module '" + cli.currentModule + "':")
+				core.PrintInfo("Module variables for '" + cli.currentModule + "':")
 				for k, v := range cli.moduleVariables {
 					fmt.Printf("  %s = %s\n", core.Color("cyan", k), core.Color("green", v))
 				}
@@ -404,10 +431,13 @@ func (cli *CLI) ExecuteCommand(input string) {
 		}
 
 		key := args[0]
-		value := strings.Join(args[1:], " ") // allow spaces in value
+		rawValue := strings.Join(args[1:], " ")
 
-		cli.moduleVariables[key] = value
-		core.PrintSuccess(fmt.Sprintf("Set %s = %s", core.Color("cyan", key), core.Color("green", value)))
+		// Expand global env vars like $ip, $url, etc.
+		expandedValue := cli.expandGlobalVars(rawValue)
+
+		cli.moduleVariables[key] = expandedValue
+		core.PrintSuccess(fmt.Sprintf("Set %s = %s", core.Color("cyan", key), core.Color("green", expandedValue)))
 		return
 
 	case "run":
