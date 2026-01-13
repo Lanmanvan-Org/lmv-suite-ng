@@ -166,25 +166,48 @@ func (cli *CLI) ExecuteCommand(input string) {
 	// #sudo cmd
 	if strings.HasPrefix(input, "#proxychains ") || strings.HasPrefix(input, "#sudo ") {
 		prefix := ""
-		cmdPart := ""
+		cmdAndMod := ""
 
 		if strings.HasPrefix(input, "#proxychains ") {
 			prefix = "proxychains "
-			cmdPart = strings.TrimSpace(input[len("#proxychains "):])
+			cmdAndMod = strings.TrimSpace(input[len("#proxychains "):])
 		} else if strings.HasPrefix(input, "#sudo ") {
 			prefix = "sudo "
-			cmdPart = strings.TrimSpace(input[len("#sudo "):])
+			cmdAndMod = strings.TrimSpace(input[len("#sudo "):])
 		}
 
-		if cmdPart == "" {
-			core.PrintError("Missing command after " + prefix[:len(prefix)-1])
+		if cmdAndMod == "" {
+			core.PrintError("Missing command after " + strings.TrimSpace(prefix[:len(prefix)-1]))
 			return
 		}
 
+		// Parse out #mod=... from cmdAndMod
+		modPath := "~/lanmanvan/modules" // default
+		finalCmd := cmdAndMod
+
+		if strings.Contains(cmdAndMod, "#mod=") {
+			// Use regex to extract #mod=... (non-greedy, allow spaces in path? but usually none)
+			modRe := regexp.MustCompile(`\s*#mod=(\S+)`)
+			modMatches := modRe.FindStringSubmatch(cmdAndMod)
+			if len(modMatches) > 1 {
+				modPath = modMatches[1]
+				// Remove the #mod=... part from the command
+				finalCmd = modRe.ReplaceAllString(cmdAndMod, "")
+				finalCmd = strings.TrimSpace(finalCmd)
+			}
+		}
+
+		if finalCmd == "" {
+			core.PrintError("Command is empty after removing #mod")
+			return
+		}
+
+		// Construct the wrapper command
 		wrapper := fmt.Sprintf(
-			`%s~/bin/lanmanvan -modules ~/lanmanvan/modules -idle-exec -idle-cmd %q`,
+			`%s~/bin/lanmanvan -modules %q -idle-exec -idle-cmd %q`,
 			prefix,
-			cmdPart,
+			modPath,
+			finalCmd,
 		)
 
 		core.PrintInfo("Executing in background/idle mode:")
