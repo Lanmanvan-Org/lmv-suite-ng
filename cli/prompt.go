@@ -22,19 +22,22 @@ func (cli *CLI) GetPrompt() string {
 		hostname = h
 	}
 
-	basePrompt := fmt.Sprintf("%s%s%s%s",
+	basePrompt := fmt.Sprintf("%s%s%s",
 		color.CyanString(username),
 		color.WhiteString("@"),
 		color.MagentaString(hostname),
-		color.GreenString("❯"),
 	)
 
-	// Show current module if set
 	if cli.currentModule != "" {
-		return fmt.Sprintf("[%s] %s ", color.YellowString(cli.currentModule), basePrompt)
+		return fmt.Sprintf("%s (%s) %s ",
+
+			basePrompt,
+			color.YellowString(cli.currentModule),
+			color.GreenString("❯"),
+		)
 	}
 
-	return basePrompt + " "
+	return basePrompt + color.GreenString("❯ ")
 }
 
 // PrintBanner prints a random application banner

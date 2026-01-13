@@ -45,6 +45,63 @@ func NewCLI(modulesDir string) *CLI {
 }
 
 // v1.5
+// expandAtSignInGlobalAssignment replaces @NAME with the value of global variable NAME.
+// Example: "@ip" → "192.168.1.1" (if global ip=192.168.1.1)
+// If @NAME is not a valid global var, leaves it as literal "@NAME".
+func (cli *CLI) expandAtSignInGlobalAssignment(value string) string {
+	if !strings.HasPrefix(value, "@") {
+		return value
+	}
+
+	varName := value[1:] // remove '@'
+	if varName == "" {
+		return value // just "@", leave as-is
+	}
+
+	// Only allow simple @name (no spaces, no special chars)
+	// Match same rules as env var names: [a-zA-Z_][a-zA-Z0-9_]*
+	re := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+	if !re.MatchString(varName) {
+		return value // invalid name, treat as literal
+	}
+
+	if val, exists := cli.envMgr.Get(varName); exists {
+		return val
+	}
+
+	// If not found, return original (e.g., "@missing" stays "@missing")
+	return value
+}
+func (cli *CLI) expandGlobalReferences(s string) string {
+	// Expand @name → global var
+	s = regexp.MustCompile(`@([a-zA-Z_][a-zA-Z0-9_]*)`).ReplaceAllStringFunc(s, func(match string) string {
+		name := match[1:]
+		if val, ok := cli.envMgr.Get(name); ok {
+			return val
+		}
+		return match // keep @name if not found
+	})
+
+	// Expand $name and ${name} → global var
+	s = regexp.MustCompile(`\$([a-zA-Z_][a-zA-Z0-9_]*)`).ReplaceAllStringFunc(s, func(match string) string {
+		name := match[1:]
+		if val, ok := cli.envMgr.Get(name); ok {
+			return val
+		}
+		return match
+	})
+
+	s = regexp.MustCompile(`\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}`).ReplaceAllStringFunc(s, func(match string) string {
+		name := match[2 : len(match)-1]
+		if val, ok := cli.envMgr.Get(name); ok {
+			return val
+		}
+		return match
+	})
+
+	return s
+}
+
 // expandGlobalVars replaces $VAR or ${VAR} with values from global envMgr
 func (cli *CLI) expandGlobalVars(input string) string {
 	// Handle $VAR (no braces)
@@ -310,16 +367,39 @@ func (cli *CLI) ExecuteCommand(input string) {
 				return
 			}
 
-			if err := cli.envMgr.Set(key, value); err != nil {
+			// 🔥 Expand @name: if in module, @name = module var; else = global var
+			expandedValue := value
+			if strings.HasPrefix(value, "@") && len(value) > 1 {
+				varName := value[1:]
+				// If a module is active, try module variable first
+				if cli.currentModule != "" {
+					if moduleVal, ok := cli.moduleVariables[varName]; ok {
+						expandedValue = moduleVal
+					} else {
+						// Optionally fall back to global? Or leave as @name?
+						// For safety, we fall back to global
+						if globalVal, ok := cli.envMgr.Get(varName); ok {
+							expandedValue = globalVal
+						}
+						// else: keep original @name (but unlikely)
+					}
+				} else {
+					// No module active → use global
+					if globalVal, ok := cli.envMgr.Get(varName); ok {
+						expandedValue = globalVal
+					}
+				}
+			}
+
+			if err := cli.envMgr.Set(key, expandedValue); err != nil {
 				core.PrintError(fmt.Sprintf("Failed to set variable: %v", err))
 				return
 			}
 
-			core.PrintSuccess(fmt.Sprintf("Set %s = %s", key, value))
+			core.PrintSuccess(fmt.Sprintf("Set %s = %s", key, expandedValue))
 			return
 		}
 	}
-
 	// ── 4. Direct shell execution with $ prefix ───────────────────────────────
 
 	if strings.HasPrefix(input, "$") {
@@ -431,13 +511,15 @@ func (cli *CLI) ExecuteCommand(input string) {
 		}
 
 		key := args[0]
+
 		rawValue := strings.Join(args[1:], " ")
 
-		// Expand global env vars like $ip, $url, etc.
-		expandedValue := cli.expandGlobalVars(rawValue)
+		// Expand @name → global env var, and $name → global env var
+		expandedValue := cli.expandGlobalReferences(rawValue)
 
 		cli.moduleVariables[key] = expandedValue
 		core.PrintSuccess(fmt.Sprintf("Set %s = %s", core.Color("cyan", key), core.Color("green", expandedValue)))
+
 		return
 
 	case "run":
