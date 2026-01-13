@@ -37,7 +37,7 @@ func (cli *CLI) GetPrompt() string {
 		)
 	}
 
-	return basePrompt + color.GreenString("❯ ")
+	return basePrompt + color.GreenString(" ❯ ")
 }
 
 // PrintBanner prints a random application banner
