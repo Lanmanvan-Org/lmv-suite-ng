@@ -2,14 +2,18 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"lanmanvan/core"
+
+	"gopkg.in/yaml.v3"
 )
 
 // CLI manages the interactive command-line interface
@@ -476,31 +480,49 @@ type Iterator interface {
 }
 
 func (cli *CLI) executeForLoop(input string) {
-	// Supported syntaxes:
-	// for $x in 1..100 -> command
-	// for x in a..z -> command
-	// for ip in 192.168.1.1..192.168.1.50 -> ping $ip
-	// for c in a..z+A..Z+0..9 -> echo $c
-	// for user in admin|root|guest -> hydra -l $user ...
-
 	input = strings.TrimSpace(input)
 
-	// Flexible regex - supports both $var and var
+	// Match: for [var] in ... -> command
 	re := regexp.MustCompile(`(?i)^for\s+(?:\$?(\w+))\s+(?:in\s+)?(.+?)\s*[-=]{1,2}>\s*(.+)$`)
 	matches := re.FindStringSubmatch(input)
 	if len(matches) != 4 {
-		core.PrintError("Invalid for-loop syntax.\nExamples:\n  for $x in 1..100 -> echo $x\n  for ip in 192.168.1.1..50 -> ping $ip\n  for c in a..z+A..Z -> echo $c")
+		core.PrintError("Invalid for-loop syntax.\nExamples:\n  for $x in 1..100 -> echo $x\n  for ip in 192.168.1.1..50 -> ping $ip\n  for url in $cat(\"urls.txt\") -> curl $url")
 		return
 	}
 
 	varName := matches[1]
-	source := strings.TrimSpace(matches[2])
-	command := strings.TrimSpace(matches[3])
+	sourceExpr := strings.TrimSpace(matches[2])
+	commandTemplate := strings.TrimSpace(matches[3])
 
-	iter, err := parseRangeSource(source)
+	// Check if source is $cat("...")
+	catRe := regexp.MustCompile(`^\$cat\(\s*["']([^"']+)["']\s*\)$`)
+	catMatches := catRe.FindStringSubmatch(sourceExpr)
+	if len(catMatches) == 2 {
+		filePath := catMatches[1]
+		// Expand ~
+		if strings.HasPrefix(filePath, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				core.PrintError("Cannot expand ~: " + err.Error())
+				return
+			}
+			filePath = filepath.Join(home, filePath[2:])
+		}
+
+		data, err := cli.loadStructuredData(filePath)
+		if err != nil {
+			core.PrintError("Failed to load data: " + err.Error())
+			return
+		}
+
+		cli.runLoopOverData(varName, data, commandTemplate)
+		return
+	}
+
+	// Fallback: original range-based iteration (1..100, a..z, etc.)
+	iter, err := parseRangeSource(sourceExpr)
 	if err != nil {
-		E_msg := "Cannot parse range: " + err.Error() + "\nSource was: " + source + ""
-		core.PrintError(E_msg)
+		core.PrintError(fmt.Sprintf("Cannot parse range: %v\nSource was: %s", err, sourceExpr))
 		return
 	}
 	defer iter.Close()
@@ -512,7 +534,7 @@ func (cli *CLI) executeForLoop(input string) {
 	}
 
 	fmt.Println()
-	core.PrintInfo(fmt.Sprintf("Loop: %s ∈ %s  (%d items)", varName, source, total))
+	core.PrintInfo(fmt.Sprintf("Loop: %s ∈ %s  (%d items)", varName, sourceExpr, total))
 	fmt.Println()
 
 	results := []string{}
@@ -525,11 +547,8 @@ func (cli *CLI) executeForLoop(input string) {
 		}
 		count++
 
-		// Support both $var and ${var}
 		expanded := regexp.MustCompile(`\$\{`+regexp.QuoteMeta(varName)+`\}|\$`+regexp.QuoteMeta(varName)).
-			ReplaceAllString(command, value)
-
-		//fmt.Printf("  [%3d/%3d] → %s\n", count, total, expanded)
+			ReplaceAllString(commandTemplate, value)
 
 		var result string
 		if strings.Contains(expanded, "|>") {
@@ -542,14 +561,148 @@ func (cli *CLI) executeForLoop(input string) {
 		}
 	}
 
-	if true {
+	if len(results) > 0 {
 		fmt.Println()
-		core.PrintSuccess("Collected results (" + string(len(results)) + "):")
+		core.PrintSuccess(fmt.Sprintf("Collected results (%d):", len(results)))
 		for i, res := range results {
 			fmt.Printf("  [%2d] %s\n", i+1, strings.TrimSpace(res))
 		}
 		fmt.Println()
 	}
+}
+
+// loadStructuredData loads .txt, .json, .yaml
+func (cli *CLI) loadStructuredData(path string) ([]interface{}, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	switch ext {
+	case ".txt":
+		lines := strings.Split(string(data), "\n")
+		var items []interface{}
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				items = append(items, line)
+			}
+		}
+		return items, nil
+
+	case ".json":
+		var parsed interface{}
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			return nil, fmt.Errorf("parse JSON: %w", err)
+		}
+		// Ensure it's a list
+		if list, ok := parsed.([]interface{}); ok {
+			return list, nil
+		}
+		return nil, fmt.Errorf("JSON must be an array")
+
+	case ".yaml", ".yml":
+		var parsed interface{}
+		if err := yaml.Unmarshal(data, &parsed); err != nil {
+			return nil, fmt.Errorf("parse YAML: %w", err)
+		}
+		if list, ok := parsed.([]interface{}); ok {
+			return list, nil
+		}
+		return nil, fmt.Errorf("YAML must be an array")
+
+	default:
+		return nil, fmt.Errorf("unsupported file type: %s (use .txt, .json, .yaml, .yml)", ext)
+	}
+}
+
+// runLoopOverData handles both simple and structured items
+func (cli *CLI) runLoopOverData(varName string, items []interface{}, commandTemplate string) {
+	if len(items) == 0 {
+		core.PrintWarning("No data loaded – nothing to do")
+		return
+	}
+
+	fmt.Println()
+	core.PrintInfo(fmt.Sprintf("Loop: %s ∈ $cat(...)  (%d items)", varName, len(items)))
+	fmt.Println()
+
+	results := []string{}
+
+	for _, item := range items {
+		// Prepare substitution context
+		var expanded string
+
+		switch v := item.(type) {
+		case string:
+			// Simple: replace $var and ${var}
+			expanded = regexp.MustCompile(`\$\{`+regexp.QuoteMeta(varName)+`\}|\$`+regexp.QuoteMeta(varName)).
+				ReplaceAllString(commandTemplate, v)
+
+		case map[interface{}]interface{}:
+			// YAML often uses interface{} keys → convert to string-keyed map
+			strMap := make(map[string]interface{})
+			for k, val := range v {
+				if ks, ok := k.(string); ok {
+					strMap[ks] = val
+				}
+			}
+			expanded = cli.expandStructuredCommand(varName, strMap, commandTemplate)
+
+		case map[string]interface{}:
+			expanded = cli.expandStructuredCommand(varName, v, commandTemplate)
+
+		default:
+			// Fallback: treat as string via fmt.Sprint
+			valStr := fmt.Sprintf("%v", v)
+			expanded = regexp.MustCompile(`\$\{`+regexp.QuoteMeta(varName)+`\}|\$`+regexp.QuoteMeta(varName)).
+				ReplaceAllString(commandTemplate, valStr)
+		}
+
+		// Execute
+		var result string
+		if strings.Contains(expanded, "|>") {
+			result = cli.executePipedCommandsForLoop(expanded)
+			if result != "" {
+				results = append(results, result)
+			}
+		} else {
+			cli.ExecuteCommand(expanded)
+		}
+	}
+
+	if len(results) > 0 {
+		fmt.Println()
+		core.PrintSuccess(fmt.Sprintf("Collected results (%d):", len(results)))
+		for i, res := range results {
+			fmt.Printf("  [%2d] %s\n", i+1, strings.TrimSpace(res))
+		}
+		fmt.Println()
+	}
+}
+
+// expandStructuredCommand replaces $(var->field) with values
+func (cli *CLI) expandStructuredCommand(varName string, data map[string]interface{}, cmd string) string {
+	// Regex: $(varname->fieldname)
+	re := regexp.MustCompile(`\$\(` + regexp.QuoteMeta(varName) + `->([a-zA-Z_][a-zA-Z0-9_]*)\)`)
+
+	expanded := re.ReplaceAllStringFunc(cmd, func(match string) string {
+		submatches := re.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+		field := submatches[1]
+		if val, exists := data[field]; exists {
+			return fmt.Sprintf("%v", val)
+		}
+		return "" // or keep placeholder? safer to blank
+	})
+
+	// Also support plain $var = whole JSON object as string (optional)
+	// But usually not needed — skip unless requested
+
+	return expanded
 }
 
 // parseRangeSource returns an iterator for different kinds of ranges
