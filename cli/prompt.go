@@ -32,7 +32,7 @@ func (cli *CLI) GetPrompt() string {
 		return fmt.Sprintf("%s (%s) %s ",
 
 			basePrompt,
-			color.YellowString(cli.currentModule),
+			color.RedString(cli.currentModule),
 			color.GreenString("❯"),
 		)
 	}
