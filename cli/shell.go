@@ -70,7 +70,7 @@ func (cli *CLI) ExecuteShellCommand(input string) {
 		}
 	}
 
-	fmt.Println()
+	//fmt.Println()
 	if err == nil {
 		//core.PrintSuccess(fmt.Sprintf("Command completed in %s", duration.String()))
 	} else {

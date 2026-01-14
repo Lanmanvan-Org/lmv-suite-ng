@@ -5,6 +5,10 @@ Supports modules written in **Python 3** and **Bash**.
 
 [official website](http://lmv-ng.vercel.app/)
 
+## Important:
+
+- This is a moduling framework, not a shell, no dont request any scripting features, it is already being implemented here: [lmv-ng scripting engine](https://github.com/Lanmanvan-Org/lmv-quick-script-engine)
+
 ## Main Features
 
 - Simple module creation (Python 3 / Bash)
