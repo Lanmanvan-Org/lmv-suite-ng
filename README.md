@@ -8,6 +8,8 @@ Supports modules written in **Python 3** and **Bash**.
 ## Important:
 
 - This is a moduling framework, not a shell, no dont request any scripting features, it is already being implemented here: [lmv-ng scripting engine](https://github.com/Lanmanvan-Org/lmv-quick-script-engine)
+- Commands such as #proxcychains and #sudo will not work when using a module, refer to use a module liek this instead: example: `ip-geolocation ip=154.32.32.32`,
+or `run xss-test url=$url`.
 
 ## Main Features
 
