@@ -25,8 +25,9 @@ type CLI struct {
 	logger  *Logger
 
 	// v1.5 more
-	currentModule   string
-	moduleVariables map[string]string
+	currentModule    string
+	moduleVariables  map[string]string
+	currentDirectory string
 }
 
 // NewCLI creates a new CLI instance
@@ -39,8 +40,9 @@ func NewCLI(modulesDir string) *CLI {
 		logger:  NewLogger(),
 
 		// v1.5: currentModule starts as empty (no module selected)
-		currentModule:   "",
-		moduleVariables: make(map[string]string),
+		currentModule:    "",
+		moduleVariables:  make(map[string]string),
+		currentDirectory: "/tmp",
 	}
 }
 

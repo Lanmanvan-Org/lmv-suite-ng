@@ -4,26 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"strings"
 	"time"
 
 	"lanmanvan/core"
 )
-
-var CurrentDir string
-
-func init() {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		if u, err := user.Current(); err == nil {
-			homeDir = u.HomeDir
-		} else {
-			homeDir = "."
-		}
-	}
-	CurrentDir = homeDir
-}
 
 // ExecuteShellCommand executes a shell command
 func (cli *CLI) ExecuteShellCommand(input string) {
@@ -60,7 +45,7 @@ func (cli *CLI) ExecuteShellCommand(input string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	cmd.Dir = CurrentDir // Set working directory
+	cmd.Dir = cli.currentDirectory // Set working directory
 
 	err := cmd.Run()
 	duration := time.Since(startTime)
@@ -78,9 +63,9 @@ func (cli *CLI) ExecuteShellCommand(input string) {
 				// Resolve the directory path
 				updateDir = exec.Command(shell, "-c", fmt.Sprintf("cd %s && pwd", newDir))
 			}
-			updateDir.Dir = CurrentDir
+			updateDir.Dir = cli.currentDirectory
 			if output, err := updateDir.Output(); err == nil {
-				CurrentDir = strings.TrimSpace(string(output))
+				cli.currentDirectory = strings.TrimSpace(string(output))
 			}
 		}
 	}

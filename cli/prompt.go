@@ -22,16 +22,18 @@ func (cli *CLI) GetPrompt() string {
 		hostname = h
 	}
 
-	basePrompt := fmt.Sprintf("%s%s%s",
+	basePrompt := fmt.Sprintf("%s%s%s (%s)",
 		color.CyanString(username),
 		color.WhiteString("@"),
 		color.MagentaString(hostname),
+		color.MagentaString(cli.currentDirectory),
 	)
 
 	if cli.currentModule != "" {
-		return fmt.Sprintf("%s (%s) %s ",
+		return fmt.Sprintf("%s (%s) (%s) %s ",
 
 			basePrompt,
+			color.MagentaString(cli.currentDirectory),
 			color.RedString(cli.currentModule),
 			color.GreenString("❯"),
 		)
