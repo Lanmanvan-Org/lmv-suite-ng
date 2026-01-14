@@ -225,405 +225,414 @@ func (cli *CLI) IdleStart(banner__ bool, command__ string) error {
 // ExecuteCommand processes user commands
 
 // handleBuiltinMacro returns true if the macro was handled (built-in), false otherwise
-func (cli *CLI) ExecuteCommand(input string) {
-	input = strings.TrimSpace(input)
-	if input == "" {
+func (cli *CLI) ExecuteCommand(inputx string) {
+	inputx = strings.TrimSpace(inputx)
+	if inputx == "" {
 		return
 	}
 
-	// ── 1. Structured / script-like syntaxes (highest priority) ───────────────
-
-	// for ... in ... -> ...
-	if strings.HasPrefix(input, "for ") &&
-		strings.Contains(input, " in ") &&
-		strings.Contains(input, " -> ") {
-		cli.executeForLoop(input)
-		return
-	}
-
-	// #proxychains cmd
-	// #sudo cmd
-	if strings.HasPrefix(input, "#proxychains ") || strings.HasPrefix(input, "#sudo ") {
-		prefix := ""
-		cmdAndMod := ""
-
-		if strings.HasPrefix(input, "#proxychains ") {
-			prefix = "proxychains "
-			cmdAndMod = strings.TrimSpace(input[len("#proxychains "):])
-		} else if strings.HasPrefix(input, "#sudo ") {
-			prefix = "sudo "
-			cmdAndMod = strings.TrimSpace(input[len("#sudo "):])
+	// ── Handle multiple commands separated by ; ─────────────────────────────
+	commands := strings.Split(inputx, ";")
+	for _, input := range commands {
+		input = strings.TrimSpace(input)
+		if input == "" {
+			continue
 		}
 
-		if cmdAndMod == "" {
-			core.PrintError("Missing command after " + strings.TrimSpace(prefix[:len(prefix)-1]))
+		// ── 1. Structured / script-like syntaxes (highest priority) ───────────────
+
+		// for ... in ... -> ...
+		if strings.HasPrefix(input, "for ") &&
+			strings.Contains(input, " in ") &&
+			strings.Contains(input, " -> ") {
+			cli.executeForLoop(input)
 			return
 		}
 
-		// Parse out #mod=... from cmdAndMod
-		modPath := "~/lanmanvan/modules" // default
-		finalCmd := cmdAndMod
+		// #proxychains cmd
+		// #sudo cmd
+		if strings.HasPrefix(input, "#proxychains ") || strings.HasPrefix(input, "#sudo ") {
+			prefix := ""
+			cmdAndMod := ""
 
-		if strings.Contains(cmdAndMod, "#mod=") {
-			// Use regex to extract #mod=... (non-greedy, allow spaces in path? but usually none)
-			modRe := regexp.MustCompile(`\s*#mod=(\S+)`)
-			modMatches := modRe.FindStringSubmatch(cmdAndMod)
-			if len(modMatches) > 1 {
-				modPath = modMatches[1]
-				// Remove the #mod=... part from the command
-				finalCmd = modRe.ReplaceAllString(cmdAndMod, "")
-				finalCmd = strings.TrimSpace(finalCmd)
+			if strings.HasPrefix(input, "#proxychains ") {
+				prefix = "proxychains "
+				cmdAndMod = strings.TrimSpace(input[len("#proxychains "):])
+			} else if strings.HasPrefix(input, "#sudo ") {
+				prefix = "sudo "
+				cmdAndMod = strings.TrimSpace(input[len("#sudo "):])
 			}
-		}
 
-		if finalCmd == "" {
-			core.PrintError("Command is empty after removing #mod")
-			return
-		}
-
-		// Construct the wrapper command
-		wrapper := fmt.Sprintf(
-			`%s~/bin/lanmanvan -modules %q -idle-exec -idle-cmd %q`,
-			prefix,
-			modPath,
-			finalCmd,
-		)
-
-		core.PrintInfo("Executing in background/idle mode:")
-		fmt.Printf("  → %s\n\n", wrapper)
-
-		cli.ExecuteShellCommand(wrapper)
-		return
-	}
-
-	// Output redirection > and >>
-	if strings.Contains(input, " > ") || strings.Contains(input, " >> ") ||
-		(strings.HasSuffix(input, ">") && !strings.HasSuffix(input, "->")) ||
-		strings.HasSuffix(input, ">>") {
-
-		greaterPos := strings.LastIndex(input, ">>")
-		if greaterPos == -1 {
-			greaterPos = strings.LastIndex(input, ">")
-		}
-
-		if greaterPos > 0 {
-			cmd := strings.TrimSpace(input[:greaterPos])
-			redirectPart := strings.TrimSpace(input[greaterPos:])
-
-			fields := strings.Fields(redirectPart)
-			if len(fields) < 2 {
-				core.PrintError("Redirection syntax: command > file  or  command >> file")
+			if cmdAndMod == "" {
+				core.PrintError("Missing command after " + strings.TrimSpace(prefix[:len(prefix)-1]))
 				return
 			}
 
-			op := fields[0] // > or >>
-			filename := strings.Join(fields[1:], " ")
-			filename = strings.Trim(filename, "\"'")
+			// Parse out #mod=... from cmdAndMod
+			modPath := "~/lanmanvan/modules" // default
+			finalCmd := cmdAndMod
 
+			if strings.Contains(cmdAndMod, "#mod=") {
+				// Use regex to extract #mod=... (non-greedy, allow spaces in path? but usually none)
+				modRe := regexp.MustCompile(`\s*#mod=(\S+)`)
+				modMatches := modRe.FindStringSubmatch(cmdAndMod)
+				if len(modMatches) > 1 {
+					modPath = modMatches[1]
+					// Remove the #mod=... part from the command
+					finalCmd = modRe.ReplaceAllString(cmdAndMod, "")
+					finalCmd = strings.TrimSpace(finalCmd)
+				}
+			}
+
+			if finalCmd == "" {
+				core.PrintError("Command is empty after removing #mod")
+				return
+			}
+
+			// Construct the wrapper command
 			wrapper := fmt.Sprintf(
-				`lmv -idle-exec -idle-cmd %q %s %q`,
-				cmd,
-				op,
-				filename,
+				`%s~/bin/lanmanvan -modules %q -idle-exec -idle-cmd %q`,
+				prefix,
+				modPath,
+				finalCmd,
 			)
 
-			core.PrintInfo("Redirecting output via idle/background executor...")
+			core.PrintInfo("Executing in background/idle mode:")
 			fmt.Printf("  → %s\n\n", wrapper)
 
 			cli.ExecuteShellCommand(wrapper)
 			return
 		}
-	}
 
-	// ── 2. Simple built-in printing commands ──────────────────────────────────
+		// Output redirection > and >>
+		if strings.Contains(input, " > ") || strings.Contains(input, " >> ") ||
+			(strings.HasSuffix(input, ">") && !strings.HasSuffix(input, "->")) ||
+			strings.HasSuffix(input, ">>") {
 
-	if strings.HasPrefix(input, "echo ") ||
-		strings.HasPrefix(input, "print ") {
-
-		content := ""
-		if strings.HasPrefix(input, "echo ") {
-			content = strings.TrimSpace(input[5:])
-		} else {
-			content = strings.TrimSpace(input[6:])
-		}
-
-		fmt.Println(content)
-		return
-	}
-
-	// ── 3. Variable operations ────────────────────────────────────────────────
-
-	// VAR=value  or  VAR=?
-	if strings.Contains(input, "=") && !strings.Contains(input, " ") {
-		parts := strings.SplitN(input, "=", 2)
-		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-
-			if value == "?" {
-				if val, exists := cli.envMgr.Get(key); exists {
-					fmt.Printf("  %s = %s\n", core.Color("cyan", key), core.Color("green", val))
-				} else {
-					core.PrintWarning(fmt.Sprintf("Variable '%s' not set", key))
-				}
-				return
+			greaterPos := strings.LastIndex(input, ">>")
+			if greaterPos == -1 {
+				greaterPos = strings.LastIndex(input, ">")
 			}
 
-			// 🔥 Expand @name: if in module, @name = module var; else = global var
-			expandedValue := value
-			if strings.HasPrefix(value, "@") && len(value) > 1 {
-				varName := value[1:]
-				// If a module is active, try module variable first
-				if cli.currentModule != "" {
-					if moduleVal, ok := cli.moduleVariables[varName]; ok {
-						expandedValue = moduleVal
+			if greaterPos > 0 {
+				cmd := strings.TrimSpace(input[:greaterPos])
+				redirectPart := strings.TrimSpace(input[greaterPos:])
+
+				fields := strings.Fields(redirectPart)
+				if len(fields) < 2 {
+					core.PrintError("Redirection syntax: command > file  or  command >> file")
+					return
+				}
+
+				op := fields[0] // > or >>
+				filename := strings.Join(fields[1:], " ")
+				filename = strings.Trim(filename, "\"'")
+
+				wrapper := fmt.Sprintf(
+					`lmv -idle-exec -idle-cmd %q %s %q`,
+					cmd,
+					op,
+					filename,
+				)
+
+				core.PrintInfo("Redirecting output via idle/background executor...")
+				fmt.Printf("  → %s\n\n", wrapper)
+
+				cli.ExecuteShellCommand(wrapper)
+				return
+			}
+		}
+
+		// ── 2. Simple built-in printing commands ──────────────────────────────────
+
+		if strings.HasPrefix(input, "echo ") ||
+			strings.HasPrefix(input, "print ") {
+
+			content := ""
+			if strings.HasPrefix(input, "echo ") {
+				content = strings.TrimSpace(input[5:])
+			} else {
+				content = strings.TrimSpace(input[6:])
+			}
+
+			fmt.Println(content)
+			return
+		}
+
+		// ── 3. Variable operations ────────────────────────────────────────────────
+
+		// VAR=value  or  VAR=?
+		if strings.Contains(input, "=") && !strings.Contains(input, " ") {
+			parts := strings.SplitN(input, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
+
+				if value == "?" {
+					if val, exists := cli.envMgr.Get(key); exists {
+						fmt.Printf("  %s = %s\n", core.Color("cyan", key), core.Color("green", val))
 					} else {
-						// Optionally fall back to global? Or leave as @name?
-						// For safety, we fall back to global
+						core.PrintWarning(fmt.Sprintf("Variable '%s' not set", key))
+					}
+					return
+				}
+
+				// 🔥 Expand @name: if in module, @name = module var; else = global var
+				expandedValue := value
+				if strings.HasPrefix(value, "@") && len(value) > 1 {
+					varName := value[1:]
+					// If a module is active, try module variable first
+					if cli.currentModule != "" {
+						if moduleVal, ok := cli.moduleVariables[varName]; ok {
+							expandedValue = moduleVal
+						} else {
+							// Optionally fall back to global? Or leave as @name?
+							// For safety, we fall back to global
+							if globalVal, ok := cli.envMgr.Get(varName); ok {
+								expandedValue = globalVal
+							}
+							// else: keep original @name (but unlikely)
+						}
+					} else {
+						// No module active → use global
 						if globalVal, ok := cli.envMgr.Get(varName); ok {
 							expandedValue = globalVal
 						}
-						// else: keep original @name (but unlikely)
 					}
+				}
+
+				if err := cli.envMgr.Set(key, expandedValue); err != nil {
+					core.PrintError(fmt.Sprintf("Failed to set variable: %v", err))
+					return
+				}
+
+				core.PrintSuccess(fmt.Sprintf("Set %s = %s", key, expandedValue))
+				return
+			}
+		}
+		// ── 4. Direct shell execution with $ prefix ───────────────────────────────
+
+		if strings.HasPrefix(input, "$") {
+			realCmd := strings.TrimSpace(input[1:])
+			cli.ExecuteShellCommand(realCmd)
+			return
+		}
+
+		// set / get
+
+		// ── 3b. @var → print module variable (only if module selected) ─────────────
+
+		if strings.HasPrefix(input, "@") && len(input) > 1 {
+			varName := strings.TrimSpace(input[1:])
+			if cli.currentModule == "" {
+				core.PrintError("No module selected. Use 'use <module>' first.")
+				return
+			}
+			if val, ok := cli.moduleVariables[varName]; ok {
+				fmt.Println(val)
+			} else {
+				core.PrintWarning(fmt.Sprintf("Module variable '@%s' not set.", varName))
+			}
+			return
+		}
+
+		// ── 5. Built-in commands & module execution ───────────────────────────────
+
+		parts := strings.Fields(input)
+		if len(parts) == 0 {
+			return
+		}
+
+		cmdName := parts[0]
+		args := parts[1:]
+
+		switch cmdName {
+		case "help", "h", "?":
+			cli.PrintHelp()
+
+		case "list", "ls", "modules":
+			cli.ListModules()
+
+		case "search":
+			if len(args) == 0 {
+				core.PrintError("Usage: search <keyword>")
+				return
+			}
+			cli.SearchModules(strings.Join(args, " "))
+
+		case "info":
+			if len(args) == 0 {
+				if cli.currentModule == "" {
+					core.PrintError("Usage: info <module>  OR  select a module with 'use <module>' and run 'info'")
+					return
+				}
+				// Show info for currently selected module
+				cli.ShowModuleInfo(cli.currentModule, 1)
+				return
+			}
+			// Show info for explicitly given module
+			cli.ShowModuleInfo(args[0], 1)
+			return
+
+		case "use":
+			if len(args) == 0 {
+				if cli.currentModule != "" {
+					core.PrintInfo(fmt.Sprintf("Currently using module: %s", core.Color("cyan", cli.currentModule)))
 				} else {
-					// No module active → use global
-					if globalVal, ok := cli.envMgr.Get(varName); ok {
-						expandedValue = globalVal
+					core.PrintInfo("No module currently selected.")
+				}
+				return
+			}
+
+			moduleName := args[0]
+
+			// Validate module exists
+			if !cli.moduleExists(moduleName) {
+				core.PrintError(fmt.Sprintf("Module '%s' not found. Use 'list' to see available modules.", moduleName))
+				return
+			}
+
+			cli.currentModule = moduleName
+			core.PrintSuccess(fmt.Sprintf("Using module: %s", core.Color("cyan", moduleName)))
+			return
+
+		case "set":
+			if cli.currentModule == "" {
+				core.PrintError("No module selected. Use 'use <module>' first.")
+				return
+			}
+
+			if len(args) == 0 {
+				// List module variables
+				if len(cli.moduleVariables) == 0 {
+					core.PrintInfo("No variables set for module '" + cli.currentModule + "'.")
+				} else {
+					core.PrintInfo("Module variables for '" + cli.currentModule + "':")
+					for k, v := range cli.moduleVariables {
+						fmt.Printf("  %s = %s\n", core.Color("cyan", k), core.Color("green", v))
 					}
 				}
-			}
-
-			if err := cli.envMgr.Set(key, expandedValue); err != nil {
-				core.PrintError(fmt.Sprintf("Failed to set variable: %v", err))
 				return
 			}
 
-			core.PrintSuccess(fmt.Sprintf("Set %s = %s", key, expandedValue))
+			if len(args) < 2 {
+				core.PrintError("Usage: set <name> <value>")
+				return
+			}
+
+			key := args[0]
+
+			rawValue := strings.Join(args[1:], " ")
+
+			// Expand @name → global env var, and $name → global env var
+			expandedValue := cli.expandGlobalReferences(rawValue)
+
+			cli.moduleVariables[key] = expandedValue
+			core.PrintSuccess(fmt.Sprintf("Set %s = %s", core.Color("cyan", key), core.Color("green", expandedValue)))
+
 			return
-		}
-	}
-	// ── 4. Direct shell execution with $ prefix ───────────────────────────────
 
-	if strings.HasPrefix(input, "$") {
-		realCmd := strings.TrimSpace(input[1:])
-		cli.ExecuteShellCommand(realCmd)
-		return
-	}
-
-	// set / get
-
-	// ── 3b. @var → print module variable (only if module selected) ─────────────
-
-	if strings.HasPrefix(input, "@") && len(input) > 1 {
-		varName := strings.TrimSpace(input[1:])
-		if cli.currentModule == "" {
-			core.PrintError("No module selected. Use 'use <module>' first.")
-			return
-		}
-		if val, ok := cli.moduleVariables[varName]; ok {
-			fmt.Println(val)
-		} else {
-			core.PrintWarning(fmt.Sprintf("Module variable '@%s' not set.", varName))
-		}
-		return
-	}
-
-	// ── 5. Built-in commands & module execution ───────────────────────────────
-
-	parts := strings.Fields(input)
-	if len(parts) == 0 {
-		return
-	}
-
-	cmdName := parts[0]
-	args := parts[1:]
-
-	switch cmdName {
-	case "help", "h", "?":
-		cli.PrintHelp()
-
-	case "list", "ls", "modules":
-		cli.ListModules()
-
-	case "search":
-		if len(args) == 0 {
-			core.PrintError("Usage: search <keyword>")
-			return
-		}
-		cli.SearchModules(strings.Join(args, " "))
-
-	case "info":
-		if len(args) == 0 {
+		case "run":
 			if cli.currentModule == "" {
-				core.PrintError("Usage: info <module>  OR  select a module with 'use <module>' and run 'info'")
+				core.PrintError("No module selected. Use 'use <module>' first, or run explicitly: run <module> [args...]")
 				return
 			}
-			// Show info for currently selected module
-			cli.ShowModuleInfo(cli.currentModule, 1)
-			return
-		}
-		// Show info for explicitly given module
-		cli.ShowModuleInfo(args[0], 1)
-		return
 
-	case "use":
-		if len(args) == 0 {
-			if cli.currentModule != "" {
-				core.PrintInfo(fmt.Sprintf("Currently using module: %s", core.Color("cyan", cli.currentModule)))
-			} else {
-				core.PrintInfo("No module currently selected.")
+			// Build final args list: start with module defaults, then apply overrides
+			finalArgs := make([]string, 0)
+
+			// Add all current module variables as key=value
+			for k, v := range cli.moduleVariables {
+				finalArgs = append(finalArgs, k+"="+v)
 			}
-			return
-		}
 
-		moduleName := args[0]
-
-		// Validate module exists
-		if !cli.moduleExists(moduleName) {
-			core.PrintError(fmt.Sprintf("Module '%s' not found. Use 'list' to see available modules.", moduleName))
-			return
-		}
-
-		cli.currentModule = moduleName
-		core.PrintSuccess(fmt.Sprintf("Using module: %s", core.Color("cyan", moduleName)))
-		return
-
-	case "set":
-		if cli.currentModule == "" {
-			core.PrintError("No module selected. Use 'use <module>' first.")
-			return
-		}
-
-		if len(args) == 0 {
-			// List module variables
-			if len(cli.moduleVariables) == 0 {
-				core.PrintInfo("No variables set for module '" + cli.currentModule + "'.")
-			} else {
-				core.PrintInfo("Module variables for '" + cli.currentModule + "':")
-				for k, v := range cli.moduleVariables {
-					fmt.Printf("  %s = %s\n", core.Color("cyan", k), core.Color("green", v))
-				}
-			}
-			return
-		}
-
-		if len(args) < 2 {
-			core.PrintError("Usage: set <name> <value>")
-			return
-		}
-
-		key := args[0]
-
-		rawValue := strings.Join(args[1:], " ")
-
-		// Expand @name → global env var, and $name → global env var
-		expandedValue := cli.expandGlobalReferences(rawValue)
-
-		cli.moduleVariables[key] = expandedValue
-		core.PrintSuccess(fmt.Sprintf("Set %s = %s", core.Color("cyan", key), core.Color("green", expandedValue)))
-
-		return
-
-	case "run":
-		if cli.currentModule == "" {
-			core.PrintError("No module selected. Use 'use <module>' first, or run explicitly: run <module> [args...]")
-			return
-		}
-
-		// Build final args list: start with module defaults, then apply overrides
-		finalArgs := make([]string, 0)
-
-		// Add all current module variables as key=value
-		for k, v := range cli.moduleVariables {
-			finalArgs = append(finalArgs, k+"="+v)
-		}
-
-		// Override with command-line args (e.g., run url=...)
-		for _, arg := range args {
-			if strings.Contains(arg, "=") {
-				// Extract key to allow override
-				parts := strings.SplitN(arg, "=", 2)
-				key := parts[0]
-				// Remove existing key from finalArgs (to avoid duplicates)
-				newFinal := make([]string, 0)
-				for _, a := range finalArgs {
-					if !strings.HasPrefix(a, key+"=") {
-						newFinal = append(newFinal, a)
+			// Override with command-line args (e.g., run url=...)
+			for _, arg := range args {
+				if strings.Contains(arg, "=") {
+					// Extract key to allow override
+					parts := strings.SplitN(arg, "=", 2)
+					key := parts[0]
+					// Remove existing key from finalArgs (to avoid duplicates)
+					newFinal := make([]string, 0)
+					for _, a := range finalArgs {
+						if !strings.HasPrefix(a, key+"=") {
+							newFinal = append(newFinal, a)
+						}
 					}
+					finalArgs = newFinal
+					// Add new override
+					finalArgs = append(finalArgs, arg)
+				} else {
+					// Not a key=value? Pass through (maybe your module supports positional args)
+					finalArgs = append(finalArgs, arg)
 				}
-				finalArgs = newFinal
-				// Add new override
-				finalArgs = append(finalArgs, arg)
-			} else {
-				// Not a key=value? Pass through (maybe your module supports positional args)
-				finalArgs = append(finalArgs, arg)
 			}
-		}
 
-		// Run the current module with merged args
-		cli.RunModule(cli.currentModule, finalArgs)
-		return
-
-	case "create", "new":
-		if len(args) == 0 {
-			core.PrintError("Usage: create <name> [python|bash|go]")
+			// Run the current module with merged args
+			cli.RunModule(cli.currentModule, finalArgs)
 			return
-		}
-		cli.CreateModule(args[0], args[1:])
 
-	case "edit":
-		if len(args) == 0 {
-			core.PrintError("Usage: edit <module>")
-			return
-		}
-		cli.EditModule(args[0])
-
-	case "delete", "rm", "remove":
-		if len(args) == 0 {
-			core.PrintError("Usage: delete <module>")
-			return
-		}
-		cli.DeleteModule(args[0])
-
-	case "env", "envs":
-		cli.envMgr.Display()
-
-	case "history":
-		cli.PrintHistory()
-
-	case "clear", "cls":
-		cli.ClearScreen()
-
-	case "refresh", "reload":
-		cli.RefreshModules()
-
-	case "exit", "quit", "q":
-		cli.running = false
-		fmt.Println()
-		core.PrintSuccess("Goodbye! See you next time.")
-		return
-
-	default:
-		// Handle "!" -> show info for current module
-		if cmdName == "!" {
-			if cli.currentModule == "" {
-				core.PrintError("No active module selected. Use 'use <module>' first.")
+		case "create", "new":
+			if len(args) == 0 {
+				core.PrintError("Usage: create <name> [python|bash|go]")
 				return
 			}
-			cli.ShowModuleInfo(cli.currentModule, 0)
-			return
-		}
+			cli.CreateModule(args[0], args[1:])
 
-		// Handle "modname!" -> show info for that module
-		if strings.HasSuffix(cmdName, "!") {
-			moduleName := strings.TrimSuffix(cmdName, "!")
-			cli.ShowModuleInfo(moduleName, 0)
-			return
-		}
+		case "edit":
+			if len(args) == 0 {
+				core.PrintError("Usage: edit <module>")
+				return
+			}
+			cli.EditModule(args[0])
 
-		// Try as module first → fallback to system shell
-		if !cli.RunModule(cmdName, args) {
-			cli.ExecuteShellCommand(input)
+		case "delete", "rm", "remove":
+			if len(args) == 0 {
+				core.PrintError("Usage: delete <module>")
+				return
+			}
+			cli.DeleteModule(args[0])
+
+		case "env", "envs":
+			cli.envMgr.Display()
+
+		case "history":
+			cli.PrintHistory()
+
+		case "clear", "cls":
+			cli.ClearScreen()
+
+		case "refresh", "reload":
+			cli.RefreshModules()
+
+		case "exit", "quit", "q":
+			cli.running = false
+			fmt.Println()
+			core.PrintSuccess("Goodbye! See you next time.")
+			return
+
+		default:
+			// Handle "!" -> show info for current module
+			if cmdName == "!" {
+				if cli.currentModule == "" {
+					core.PrintError("No active module selected. Use 'use <module>' first.")
+					return
+				}
+				cli.ShowModuleInfo(cli.currentModule, 0)
+				return
+			}
+
+			// Handle "modname!" -> show info for that module
+			if strings.HasSuffix(cmdName, "!") {
+				moduleName := strings.TrimSuffix(cmdName, "!")
+				cli.ShowModuleInfo(moduleName, 0)
+				return
+			}
+
+			// Try as module first → fallback to system shell
+			if !cli.RunModule(cmdName, args) {
+				cli.ExecuteShellCommand(input)
+			}
 		}
 	}
 }
