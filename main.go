@@ -36,7 +36,7 @@ func main() {
 	flag.Parse()
 
 	if version {
-		fmt.Println("lmv-ng %s - Advanced Modular Framework in Go", versionText)
+		fmt.Printf("lmv-ng " + versionText + " - Advanced Modular Framework in Go ")
 		os.Exit(0)
 	}
 

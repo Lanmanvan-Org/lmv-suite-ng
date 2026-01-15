@@ -3,7 +3,7 @@ module lanmanvan
 go 1.21
 
 require (
-	github.com/chzyer/readline v2.0.1
+	github.com/chzyer/readline v1.5.1 // or latest version you want
 	github.com/fatih/color v1.16.0
 	gopkg.in/yaml.v3 v3.0.1
 )
