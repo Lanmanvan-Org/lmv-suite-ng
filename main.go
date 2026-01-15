@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"lanmanvan/cli"
 )
@@ -20,6 +21,8 @@ func main() {
 
 	var show_banner bool
 
+	var resourceFile string
+
 	flag.StringVar(&modulesDir, "modules", "./modules", "Path to modules directory (string)")
 	flag.BoolVar(&version, "version", false, "Show version (bool)")
 
@@ -28,10 +31,12 @@ func main() {
 
 	flag.BoolVar(&show_banner, "banner", false, "Want to show the *lanmanvan* official banner? (bool)")
 
+	flag.StringVar(&resourceFile, "r", "", "Path to resource file (string)")
+
 	flag.Parse()
 
 	if version {
-		fmt.Println("LanManVan %s - Advanced Modular Framework in Go", versionText)
+		fmt.Println("lmv-ng %s - Advanced Modular Framework in Go", versionText)
 		os.Exit(0)
 	}
 
@@ -52,32 +57,53 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create and start CLI
+	// Create CLI instance
 	cliInstance := cli.NewCLI(absPath)
-	if !exec {
-		if err := cliInstance.Start(show_banner); err != nil {
+
+	bannerShown := false
+
+	if resourceFile != "" {
+		content, err := os.ReadFile(resourceFile)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
+		}
+
+		lines := strings.Split(string(content), "\n")
+		var commands []string
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			commands = append(commands, line)
+		}
+
+		for _, cmd := range commands {
+			b := show_banner && !bannerShown
+			if err := cliInstance.IdleStart(b, cmd); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			if b {
+				bannerShown = true
+			}
 		}
 	}
 
 	if exec {
 		if exec_cmd != "" {
-			//execute command and exit!
-
-			//init shell
-			cliInstance := cli.NewCLI(absPath)
-
-			//show banner & execute command
-			if err := cliInstance.IdleStart(show_banner, exec_cmd); err != nil {
+			b := show_banner && !bannerShown
+			if err := cliInstance.IdleStart(b, exec_cmd); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
-
-			//optional: save it to file?
-			//exit
-			os.Exit(0)
 		}
 		os.Exit(0)
+	} else {
+		if err := cliInstance.Start(show_banner && !bannerShown); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
