@@ -14,7 +14,7 @@ func main() {
 	var modulesDir string
 	var version bool
 	var versionText string
-	versionText = "1.5"
+	versionText = "2.0"
 
 	var exec bool
 	var exec_cmd string

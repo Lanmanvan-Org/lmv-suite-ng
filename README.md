@@ -1,4 +1,4 @@
-# LanManVan Framework v1.5
+# LanManVan Framework v2.0
 
 A lightweight, Metasploit-inspired modular framework written in Go.  
 Supports modules written in **Python 3** and **Bash**.

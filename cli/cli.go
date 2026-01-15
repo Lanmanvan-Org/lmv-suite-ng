@@ -24,7 +24,7 @@ type CLI struct {
 	envMgr  *EnvironmentManager
 	logger  *Logger
 
-	// v1.5 more
+	// v2.0 more
 	currentModule    string
 	moduleVariables  map[string]string
 	currentDirectory string
@@ -39,14 +39,14 @@ func NewCLI(modulesDir string) *CLI {
 		envMgr:  NewEnvironmentManager(),
 		logger:  NewLogger(),
 
-		// v1.5: currentModule starts as empty (no module selected)
+		// v2.0: currentModule starts as empty (no module selected)
 		currentModule:    "",
 		moduleVariables:  make(map[string]string),
 		currentDirectory: "/tmp",
 	}
 }
 
-// v1.5
+// v2.0
 // expandAtSignInGlobalAssignment replaces @NAME with the value of global variable NAME.
 // Example: "@ip" → "192.168.1.1" (if global ip=192.168.1.1)
 // If @NAME is not a valid global var, leaves it as literal "@NAME".
@@ -145,11 +145,11 @@ func (cli *CLI) Start(banner__ bool) error {
 	cli.setupSignalHandler()
 
 	///////////////////////////////////
-	// v1.5
+	// v2.0
 
 	// In your CLI initialization (NewCLI or similar):
 
-	// END v1.5
+	// END v2.0
 
 	// Create readline instance with history support
 	rl, err := cli.getReadlineInstance()
@@ -1012,7 +1012,7 @@ func (it *chainIterator) Close() error {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// IP Range Iterator (full IPs: 192.168.1.1 .. 192.168.1.50)
+// IP Range Iterator (full IPs: 192.168.1.1 .. 192.168.2.00)
 // ────────────────────────────────────────────────────────────────────────────────
 
 type ipRangeIterator struct {
@@ -1074,7 +1074,7 @@ func ipToInt(ip net.IP) int64 {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Partial IP Range (last octet only)  e.g. 192.168.1.10..192.168.1.50
+// Partial IP Range (last octet only)  e.g. 192.168.1.10..192.168.2.00
 // ────────────────────────────────────────────────────────────────────────────────
 
 type partialIPRangeIterator struct {
