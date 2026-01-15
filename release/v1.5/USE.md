@@ -1,7 +1,7 @@
 <code>
 # LanManVan — Module Context Guide (`use`, `set`, `run`)
 
-This guide explains how to use module context, scoped variables, and smart execution in **LanManVan CLI v2.0+**.
+This guide explains how to use module context, scoped variables, and smart execution in **LanManVan CLI v1.5+**.
 
 ---
 

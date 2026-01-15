@@ -1,4 +1,4 @@
-# LanManVan v2.0.0 Release Notes
+# LanManVan v1.5.0 Release Notes
 
 **Release Date:** January 9–10, 2026  
 **Build Author:** hmza
