@@ -26,32 +26,77 @@ func NewModuleManager(modulesDir string) *ModuleManager {
 }
 
 // DiscoverModules scans the modules directory and loads module metadata
+// Supports both flat modules and nested namespaces (e.g., smtp/esmtp-enum)
 func (mm *ModuleManager) DiscoverModules() error {
 	if err := os.MkdirAll(mm.ModulesDir, 0755); err != nil {
 		return fmt.Errorf("failed to create modules directory: %w", err)
 	}
 
-	entries, err := os.ReadDir(mm.ModulesDir)
+	return mm.discoverModulesRecursive(mm.ModulesDir, "")
+}
+
+// discoverModulesRecursive recursively discovers modules in subdirectories
+func (mm *ModuleManager) discoverModulesRecursive(dir string, namespace string) error {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("failed to read modules directory: %w", err)
+		return fmt.Errorf("failed to read directory %s: %w", dir, err)
 	}
 
 	for _, entry := range entries {
 		if entry.IsDir() {
-			moduleDir := filepath.Join(mm.ModulesDir, entry.Name())
-			mm.loadModuleFromDir(moduleDir)
+			fullPath := filepath.Join(dir, entry.Name())
+
+			// Build the namespace-qualified name
+			var qualifiedName string
+			if namespace == "" {
+				qualifiedName = entry.Name()
+			} else {
+				qualifiedName = namespace + "." + entry.Name()
+			}
+
+			// Check if this directory contains a module.yaml or module files
+			if mm.isModuleDir(fullPath) {
+				mm.loadModuleFromDir(fullPath, qualifiedName)
+			} else {
+				// If not a module, treat as a namespace and recurse
+				mm.discoverModulesRecursive(fullPath, qualifiedName)
+			}
 		}
 	}
 
 	return nil
 }
 
-// loadModuleFromDir loads a module from a directory
-func (mm *ModuleManager) loadModuleFromDir(moduleDir string) {
-	moduleName := filepath.Base(moduleDir)
+// isModuleDir checks if a directory is a module directory
+func (mm *ModuleManager) isModuleDir(dir string) bool {
+	// Check for module.yaml
+	if _, err := os.Stat(filepath.Join(dir, "module.yaml")); err == nil {
+		return true
+	}
+
+	// Check for known module files
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			name := entry.Name()
+			if strings.HasSuffix(name, ".py") || strings.HasSuffix(name, ".sh") || strings.HasSuffix(name, ".go") {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// loadModuleFromDir loads a module from a directory with its qualified name
+func (mm *ModuleManager) loadModuleFromDir(moduleDir string, qualifiedName string) {
 	moduleConfig := &ModuleConfig{
 		Path:   moduleDir,
-		Name:   moduleName,
+		Name:   qualifiedName,
 		Loaded: false,
 	}
 
@@ -61,7 +106,7 @@ func (mm *ModuleManager) loadModuleFromDir(moduleDir string) {
 		metadata, err := loadMetadata(metadataPath)
 		if err != nil {
 			moduleConfig.LoadError = err.Error()
-			mm.Modules[moduleName] = moduleConfig
+			mm.Modules[qualifiedName] = moduleConfig
 			return
 		}
 		moduleConfig.Metadata = metadata
@@ -72,7 +117,7 @@ func (mm *ModuleManager) loadModuleFromDir(moduleDir string) {
 	}
 
 	moduleConfig.Loaded = true
-	mm.Modules[moduleName] = moduleConfig
+	mm.Modules[qualifiedName] = moduleConfig
 }
 
 // inferModuleType determines module type based on file extensions

@@ -19,6 +19,44 @@ def load_repos():
         return repos
     return {}
 
+def is_module_dir(path):
+    """Check if a directory is a module directory"""
+    # Check for module.yaml
+    if os.path.exists(os.path.join(path, "module.yaml")):
+        return True
+    # Check for known module files
+    for f in os.listdir(path):
+        if f.endswith((".py", ".sh", ".go")) and os.path.isfile(os.path.join(path, f)):
+            return True
+    return False
+
+def list_modules_recursive(base_path, namespace=""):
+    """Recursively list all modules with namespace support"""
+    modules = []
+    
+    if not os.path.exists(base_path):
+        return modules
+    
+    try:
+        entries = os.listdir(base_path)
+    except PermissionError:
+        return modules
+    
+    for entry in entries:
+        full_path = os.path.join(base_path, entry)
+        if os.path.isdir(full_path) and not entry.startswith('.'):
+            # Build qualified name
+            qualified_name = f"{namespace}.{entry}" if namespace else entry
+            
+            # Check if it's a module
+            if is_module_dir(full_path):
+                modules.append(qualified_name)
+            else:
+                # Recurse for nested namespaces
+                modules.extend(list_modules_recursive(full_path, qualified_name))
+    
+    return modules
+
 def clone_repo(url, tmp_dir):
     try:
         subprocess.run(["git", "clone", "--quiet", url, tmp_dir], check=True)
@@ -51,7 +89,7 @@ def main():
         sys.exit(0)
 
     if args.command == "list":
-        modules = [d for d in os.listdir(MODULES_DIR) if os.path.isdir(os.path.join(MODULES_DIR, d))]
+        modules = list_modules_recursive(MODULES_DIR)
         if not modules:
             print("[!] No modules installed")
         else:
