@@ -31,9 +31,22 @@ type CLI struct {
 }
 
 // NewCLI creates a new CLI instance
-func NewCLI(modulesDir string) *CLI {
+func NewCLI(modulesDirs interface{}) *CLI {
+	var manager *core.ModuleManager
+
+	// Handle both string (old API) and []string (new API)
+	switch dirs := modulesDirs.(type) {
+	case string:
+		manager = core.NewModuleManager([]string{dirs})
+	case []string:
+		manager = core.NewModuleManager(dirs)
+	default:
+		// Fallback to default
+		manager = core.NewModuleManager([]string{"./modules"})
+	}
+
 	return &CLI{
-		manager: core.NewModuleManager(modulesDir),
+		manager: manager,
 		running: true,
 		history: make([]string, 0),
 		envMgr:  NewEnvironmentManager(),
@@ -605,6 +618,9 @@ func (cli *CLI) ExecuteCommand(inputx string) {
 		case "refresh", "reload":
 			cli.RefreshModules()
 
+		case "modules-path", "module-paths":
+			cli.ShowModulesPaths()
+
 		case "exit", "quit", "q":
 			cli.running = false
 			fmt.Println()
@@ -671,9 +687,8 @@ func (cli *CLI) RefreshModules() {
 	core.PrintInfo("Refreshing modules...")
 	fmt.Println()
 
-	// Clear and reinitialize the module manager with the same directory
-	modulesDirPath := cli.manager.ModulesDir
-	cli.manager = core.NewModuleManager(modulesDirPath)
+	// Clear and reinitialize the module manager with the same directories
+	cli.manager = core.NewModuleManager(cli.manager.ModulesDirs)
 
 	// Discover modules again
 	if err := cli.manager.DiscoverModules(); err != nil {
@@ -699,6 +714,42 @@ func (cli *CLI) RefreshModules() {
 		}
 		fmt.Println()
 	}
+}
+
+// ShowModulesPaths displays the modules directories configured in this session
+func (cli *CLI) ShowModulesPaths() {
+	fmt.Println()
+	core.PrintInfo("Module Search Paths (configured in this session)")
+	fmt.Println()
+
+	if len(cli.manager.ModulesDirs) == 0 {
+		core.PrintWarning("No modules directories configured")
+		fmt.Println()
+		return
+	}
+
+	fmt.Println(core.NmapBox("Modules Directories"))
+
+	for i, dir := range cli.manager.ModulesDirs {
+		// Count modules in this directory
+		moduleCount := 0
+		if entries, err := os.ReadDir(dir); err == nil {
+			moduleCount = len(entries)
+		}
+
+		status := "✓"
+		if _, err := os.Stat(dir); err != nil {
+			status = "✗"
+		}
+
+		absPath, _ := filepath.Abs(dir)
+		fmt.Printf("  [%d] %s %s\n", i+1, core.Color("cyan", status), absPath)
+		fmt.Printf("      └─ Contains ~%d items\n", moduleCount)
+	}
+
+	fmt.Println()
+	fmt.Println(core.Color("yellow", "Tip:") + " You can add more directories using: ./lanmanvan -modules /path1:/path2:/path3")
+	fmt.Println()
 }
 
 // Iterator represents something that can produce values one by one

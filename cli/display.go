@@ -42,6 +42,7 @@ func (cli *CLI) PrintHelp() {
 		{"history", "Show command history"},
 		{"clear, cls", "Clear the terminal screen (alias: cls)"},
 		{"refresh, reload", "Reload/refresh all modules from disk"},
+		{"modules-path", "Show module search paths configured in this session"},
 		{"exit, quit, q", "Exit the framework (aliases: quit, q)"},
 	}
 
@@ -383,10 +384,17 @@ func (cli *CLI) ShowModuleInfo(moduleName string, showREADME int) {
 
 // displayReadme reads and displays the README.md as "About This Module"
 func (cli *CLI) displayReadme(moduleName string, module *core.ModuleConfig) {
-	readmePath := filepath.Join(cli.manager.ModulesDir, moduleName, "README.md")
+	// Try to find README in any of the module directories
+	var readmePath string
+	for _, dir := range cli.manager.ModulesDirs {
+		path := filepath.Join(dir, moduleName, "README.md")
+		if _, err := os.Stat(path); err == nil {
+			readmePath = path
+			break
+		}
+	}
 
-	// Check if README exists
-	if _, err := os.Stat(readmePath); err != nil {
+	if readmePath == "" {
 		return
 	}
 

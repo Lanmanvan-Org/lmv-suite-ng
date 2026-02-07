@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	var modulesDir string
+	var modulesDirs string
 	var version bool
 	var versionText string
 	versionText = "2.0"
@@ -23,7 +23,7 @@ func main() {
 
 	var resourceFile string
 
-	flag.StringVar(&modulesDir, "modules", "./modules", "Path to modules directory (string)")
+	flag.StringVar(&modulesDirs, "modules", "./modules", "Path(s) to modules directories, separated by colon (:)")
 	flag.BoolVar(&version, "version", false, "Show version (bool)")
 
 	flag.BoolVar(&exec, "idle-exec", false, "Execute command and exit? (bool)")
@@ -40,25 +40,36 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Expand home directory if needed
-	if modulesDir == "~" {
-		home, err := os.UserHomeDir()
+	// Parse multiple module directories separated by colon
+	var modulePaths []string
+	for _, dir := range strings.Split(modulesDirs, ":") {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			continue
+		}
+
+		// Expand home directory if needed
+		if dir == "~" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: could not determine home directory: %v\n", err)
+				os.Exit(1)
+			}
+			dir = home
+		}
+
+		// Make absolute path
+		absPath, err := filepath.Abs(dir)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: could not determine home directory: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: invalid modules path: %v\n", err)
 			os.Exit(1)
 		}
-		modulesDir = home
+
+		modulePaths = append(modulePaths, absPath)
 	}
 
-	// Make absolute path
-	absPath, err := filepath.Abs(modulesDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: invalid modules path: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Create CLI instance
-	cliInstance := cli.NewCLI(absPath)
+	// Create CLI instance with multiple paths
+	cliInstance := cli.NewCLI(modulePaths)
 
 	bannerShown := false
 

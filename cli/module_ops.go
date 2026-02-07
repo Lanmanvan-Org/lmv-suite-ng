@@ -226,12 +226,17 @@ func (cli *CLI) CreateModule(moduleName string, args []string) {
 		moduleType = strings.ToLower(args[0])
 	}
 
-	if moduleType != "python" && moduleType != "bash" {
-		core.PrintError("Invalid type. Use 'python' or 'bash', default is 'python'")
+	if moduleType != "python" && moduleType != "bash" && moduleType != "ruby" {
+		core.PrintError("Invalid type. Use 'python', 'bash', or 'ruby', default is 'python'")
 		return
 	}
 
-	moduleDir := filepath.Join(cli.manager.ModulesDir, moduleName)
+	// Use the first modules directory for creating new modules
+	if len(cli.manager.ModulesDirs) == 0 {
+		core.PrintError("No modules directories configured")
+		return
+	}
+	moduleDir := filepath.Join(cli.manager.ModulesDirs[0], moduleName)
 
 	// Check if already exists
 	if _, err := os.Stat(moduleDir); err == nil {
@@ -297,6 +302,24 @@ def main():
 
 if __name__ == '__main__':
     main()
+`
+	} else if moduleType == "ruby" {
+		scriptName = "main.rb"
+		scriptContent = `#!/usr/bin/env ruby
+# Module: ` + moduleName + `
+# Description: Your module description
+
+target = ENV['ARG_TARGET'] || 'localhost'
+
+puts "[*] Module executing on #{target}"
+
+begin
+  # Your code here
+  puts "[+] Module completed successfully!"
+rescue => e
+  puts "[!] Error: #{e.message}"
+  exit 1
+end
 `
 	} else {
 		scriptName = "main.sh"

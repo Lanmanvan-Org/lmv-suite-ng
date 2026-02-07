@@ -13,26 +13,31 @@ import (
 
 // ModuleManager handles module discovery, loading, and execution
 type ModuleManager struct {
-	ModulesDir string
-	Modules    map[string]*ModuleConfig
+	ModulesDirs []string // Support multiple module directories
+	Modules     map[string]*ModuleConfig
 }
 
 // NewModuleManager creates a new module manager
-func NewModuleManager(modulesDir string) *ModuleManager {
+func NewModuleManager(modulesDirs []string) *ModuleManager {
 	return &ModuleManager{
-		ModulesDir: modulesDir,
-		Modules:    make(map[string]*ModuleConfig),
+		ModulesDirs: modulesDirs,
+		Modules:     make(map[string]*ModuleConfig),
 	}
 }
 
-// DiscoverModules scans the modules directory and loads module metadata
+// DiscoverModules scans all module directories and loads module metadata
 // Supports both flat modules and nested namespaces (e.g., smtp/esmtp-enum)
 func (mm *ModuleManager) DiscoverModules() error {
-	if err := os.MkdirAll(mm.ModulesDir, 0755); err != nil {
-		return fmt.Errorf("failed to create modules directory: %w", err)
-	}
+	for _, dir := range mm.ModulesDirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create modules directory %s: %w", dir, err)
+		}
 
-	return mm.discoverModulesRecursive(mm.ModulesDir, "")
+		if err := mm.discoverModulesRecursive(dir, ""); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // discoverModulesRecursive recursively discovers modules in subdirectories
@@ -83,7 +88,7 @@ func (mm *ModuleManager) isModuleDir(dir string) bool {
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			name := entry.Name()
-			if strings.HasSuffix(name, ".py") || strings.HasSuffix(name, ".sh") || strings.HasSuffix(name, ".go") {
+			if strings.HasSuffix(name, ".py") || strings.HasSuffix(name, ".sh") || strings.HasSuffix(name, ".go") || strings.HasSuffix(name, ".rb") {
 				return true
 			}
 		}
@@ -134,6 +139,9 @@ func (mm *ModuleManager) inferModuleType(moduleDir string) string {
 		if strings.HasSuffix(name, ".go") {
 			return "go"
 		}
+		if strings.HasSuffix(name, ".rb") {
+			return "ruby"
+		}
 	}
 	return "unknown"
 }
@@ -164,8 +172,10 @@ func (mm *ModuleManager) ExecuteModule(moduleName string, args map[string]string
 		return executeBashModule(module, args)
 	case "go":
 		return executeGoModule(module, args)
+	case "ruby":
+		return executeRubyModule(module, args)
 	default:
-		return nil, fmt.Errorf("unsupported module type: %s, supported types are: python, bash", module.Type)
+		return nil, fmt.Errorf("unsupported module type: %s, supported types are: python, bash, ruby", module.Type)
 	}
 }
 
@@ -273,6 +283,53 @@ func executeGoModule(module *ModuleConfig, args map[string]string) (*ExecutionRe
 		Error:     "Go module execution not yet implemented, please build and run manually, thanks!",
 		ExitCode:  1,
 	}
+	return result, nil
+}
+
+// executeRubyModule runs a Ruby module with real-time output
+func executeRubyModule(module *ModuleConfig, args map[string]string) (*ExecutionResult, error) {
+	result := &ExecutionResult{
+		Timestamp: time.Now(),
+	}
+
+	scriptPath := findMainScript(module.Path, ".rb")
+	if scriptPath == "" {
+		result.Success = false
+		result.Error = "no Ruby script found in module, expected .rb file, e.g., main.rb or run.rb"
+		result.ExitCode = 1
+		return result, nil
+	}
+
+	cmd := exec.Command("ruby", scriptPath)
+	cmd.Dir = module.Path
+
+	// Set environment variables
+	env := os.Environ()
+	for key, value := range args {
+		env = append(env, fmt.Sprintf("ARG_%s=%s", strings.ToUpper(key), value))
+	}
+	cmd.Env = env
+
+	// Stream output in real-time
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	err := cmd.Run()
+
+	if err != nil {
+		result.Success = false
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitErr.ExitCode()
+		} else {
+			result.ExitCode = 1
+		}
+		result.Error = err.Error()
+	} else {
+		result.Success = true
+		result.ExitCode = 0
+	}
+
 	return result, nil
 }
 

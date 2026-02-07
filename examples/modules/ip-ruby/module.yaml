@@ -1,0 +1,22 @@
+name: ip-geolocation-py
+description: "Get geolocation information for an IP address using ip-api.com (Python)"
+type: ruby
+author: LanManVan Team
+version: 1.0.0
+tags:
+  - geolocation
+  - ip
+  - recon
+  - python
+options:
+  ip:
+    type: string
+    description: IP address to geolocate
+    required: true
+  format:
+    type: string
+    description: Output format (json, csv, text)
+    default: "text"
+    required: false
+required:
+  - ip

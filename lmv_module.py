@@ -26,7 +26,7 @@ def is_module_dir(path):
         return True
     # Check for known module files
     for f in os.listdir(path):
-        if f.endswith((".py", ".sh", ".go")) and os.path.isfile(os.path.join(path, f)):
+        if f.endswith((".py", ".sh", ".go", ".rb")) and os.path.isfile(os.path.join(path, f)):
             return True
     return False
 
