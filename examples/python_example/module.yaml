@@ -1,0 +1,24 @@
+name: python_example
+description: "Example Python module demonstrating environment variables, error handling, and output formatting"
+type: python
+author: LanManVan Team
+version: 1.0.0
+tags:
+  - example
+  - python
+  - educational
+options:
+  target:
+    type: string
+    description: Target host or domain
+    required: true
+  port:
+    type: string
+    description: Port number (optional)
+    required: false
+  timeout:
+    type: string
+    description: Timeout in seconds
+    required: false
+required:
+  - target

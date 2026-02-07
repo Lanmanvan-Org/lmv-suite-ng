@@ -1,0 +1,32 @@
+name: port-scanner
+description: "Scan ports on a host to find open services (Bash)"
+type: bash
+author: LanManVan Team
+version: 1.0.0
+tags:
+  - port-scanning
+  - reconnaissance
+  - bash
+  - networking
+options:
+  host:
+    type: string
+    description: Target hostname or IP address
+    required: true
+  ports:
+    type: string
+    description: Port range or list (e.g., 22,80,443 or 1-1000)
+    default: "1-1000"
+    required: false
+  timeout:
+    type: string
+    description: Connection timeout in seconds
+    default: "2"
+    required: false
+  threads:
+    type: string
+    description: Number of parallel threads
+    default: "5"
+    required: false
+required:
+  - host

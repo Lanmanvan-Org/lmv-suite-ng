@@ -1,0 +1,24 @@
+name: bash_example
+description: "Example Bash module demonstrating shell scripting, loops, and system calls"
+type: bash
+author: LanManVan Team
+version: 1.0.0
+tags:
+  - example
+  - bash
+  - educational
+options:
+  hosts:
+    type: string
+    description: Comma-separated list of hosts to ping
+    required: true
+  count:
+    type: string
+    description: Number of ping attempts
+    required: false
+  verbose:
+    type: string
+    description: Verbose output (true/false)
+    required: false
+required:
+  - hosts

@@ -1,0 +1,19 @@
+name: go_example
+description: "Example Go module demonstrating Go concurrency, JSON handling, and type safety"
+type: go
+author: LanManVan Team
+version: 1.0.0
+tags:
+  - example
+  - go
+  - educational
+options:
+  iterations:
+    type: string
+    description: Number of iterations to run
+    required: false
+  message:
+    type: string
+    description: Message to display
+    required: false
+required: []
