@@ -530,6 +530,8 @@ func (cli *CLI) getTypeBadge(moduleType string) string {
 		return color.BlueString("[PY]")
 	case "bash":
 		return color.CyanString("[SH]")
+	case "ruby":
+		return color.CyanString("[RB]")
 	case "go":
 		return color.MagentaString("[GO]")
 	default:
