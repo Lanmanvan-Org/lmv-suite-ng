@@ -13,11 +13,10 @@ import (
 
 // ModuleManager handles module discovery, loading, and execution
 type ModuleManager struct {
-	ModulesDirs []string // Support multiple module directories
+	ModulesDirs []string
 	Modules     map[string]*ModuleConfig
 }
 
-// NewModuleManager creates a new module manager
 func NewModuleManager(modulesDirs []string) *ModuleManager {
 	return &ModuleManager{
 		ModulesDirs: modulesDirs,
@@ -25,193 +24,193 @@ func NewModuleManager(modulesDirs []string) *ModuleManager {
 	}
 }
 
-// DiscoverModules scans all module directories and loads module metadata
-// Supports both flat modules and nested namespaces (e.g., smtp/esmtp-enum)
 func (mm *ModuleManager) DiscoverModules() error {
 	for _, dir := range mm.ModulesDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create modules directory %s: %w", dir, err)
+			return fmt.Errorf("cannot create modules directory %q: %w", dir, err)
 		}
 
 		if err := mm.discoverModulesRecursive(dir, ""); err != nil {
-			return err
+			return fmt.Errorf("module discovery failed in directory %q: %w", dir, err)
 		}
 	}
 	return nil
 }
 
-// discoverModulesRecursive recursively discovers modules in subdirectories
-func (mm *ModuleManager) discoverModulesRecursive(dir string, namespace string) error {
-	entries, err := os.ReadDir(dir)
+func (mm *ModuleManager) discoverModulesRecursive(baseDir, namespace string) error {
+	entries, err := os.ReadDir(baseDir)
 	if err != nil {
-		return fmt.Errorf("failed to read directory %s: %w", dir, err)
+		return fmt.Errorf("cannot read directory %q: %w", baseDir, err)
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() {
-			fullPath := filepath.Join(dir, entry.Name())
+		if !entry.IsDir() {
+			continue
+		}
 
-			// Build the namespace-qualified name
-			var qualifiedName string
-			if namespace == "" {
-				qualifiedName = entry.Name()
-			} else {
-				qualifiedName = namespace + "." + entry.Name()
-			}
+		fullPath := filepath.Join(baseDir, entry.Name())
+		qualifiedName := entry.Name()
+		if namespace != "" {
+			qualifiedName = namespace + "." + entry.Name()
+		}
 
-			// Check if this directory contains a module.yaml or module files
-			if mm.isModuleDir(fullPath) {
-				mm.loadModuleFromDir(fullPath, qualifiedName)
-			} else {
-				// If not a module, treat as a namespace and recurse
-				mm.discoverModulesRecursive(fullPath, qualifiedName)
+		if mm.isModuleDir(fullPath) {
+			mm.loadModuleFromDir(fullPath, qualifiedName)
+		} else {
+			if err := mm.discoverModulesRecursive(fullPath, qualifiedName); err != nil {
+				return err
 			}
 		}
 	}
-
 	return nil
 }
 
-// isModuleDir checks if a directory is a module directory
 func (mm *ModuleManager) isModuleDir(dir string) bool {
-	// Check for module.yaml
+	// Fast path: module.yaml exists → it's a module
 	if _, err := os.Stat(filepath.Join(dir, "module.yaml")); err == nil {
 		return true
 	}
 
-	// Check for known module files
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false
 	}
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			name := entry.Name()
-			if strings.HasSuffix(name, ".py") || strings.HasSuffix(name, ".sh") || strings.HasSuffix(name, ".go") || strings.HasSuffix(name, ".rb") {
-				return true
-			}
+	for _, e := range entries {
+		if !e.IsDir() && hasScriptExtension(e.Name()) {
+			return true
 		}
 	}
-
 	return false
 }
 
-// loadModuleFromDir loads a module from a directory with its qualified name
-func (mm *ModuleManager) loadModuleFromDir(moduleDir string, qualifiedName string) {
-	moduleConfig := &ModuleConfig{
-		Path:   moduleDir,
+func hasScriptExtension(name string) bool {
+	return strings.HasSuffix(name, ".py") ||
+		strings.HasSuffix(name, ".sh") ||
+		strings.HasSuffix(name, ".rb") ||
+		strings.HasSuffix(name, ".go")
+}
+
+func (mm *ModuleManager) loadModuleFromDir(dir, qualifiedName string) {
+	cfg := &ModuleConfig{
+		Path:   dir,
 		Name:   qualifiedName,
 		Loaded: false,
 	}
 
-	// Try to load metadata from module.yaml
-	metadataPath := filepath.Join(moduleDir, "module.yaml")
-	if _, err := os.Stat(metadataPath); err == nil {
-		metadata, err := loadMetadata(metadataPath)
+	metaPath := filepath.Join(dir, "module.yaml")
+	if _, err := os.Stat(metaPath); err == nil {
+		meta, err := loadMetadata(metaPath)
 		if err != nil {
-			moduleConfig.LoadError = err.Error()
-			mm.Modules[qualifiedName] = moduleConfig
+			cfg.LoadError = fmt.Sprintf("invalid module.yaml in %q: %v", dir, err)
+			mm.Modules[qualifiedName] = cfg
 			return
 		}
-		moduleConfig.Metadata = metadata
-		moduleConfig.Type = metadata.Type
-	} else {
-		// Try to infer type from available files
-		moduleConfig.Type = mm.inferModuleType(moduleDir)
+		cfg.Metadata = meta
+		if meta.Type != "" {
+			cfg.Type = meta.Type
+		}
 	}
 
-	moduleConfig.Loaded = true
-	mm.Modules[qualifiedName] = moduleConfig
+	if cfg.Type == "" {
+		cfg.Type = mm.inferModuleType(dir)
+	}
+
+	cfg.Loaded = true
+	mm.Modules[qualifiedName] = cfg
 }
 
-// inferModuleType determines module type based on file extensions
-func (mm *ModuleManager) inferModuleType(moduleDir string) string {
-	entries, _ := os.ReadDir(moduleDir)
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasSuffix(name, ".py") {
+func (mm *ModuleManager) inferModuleType(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "unknown"
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		switch {
+		case strings.HasSuffix(name, ".py"):
 			return "python"
-		}
-		if strings.HasSuffix(name, ".sh") {
+		case strings.HasSuffix(name, ".sh"):
 			return "bash"
-		}
-		if strings.HasSuffix(name, ".go") {
-			return "go"
-		}
-		if strings.HasSuffix(name, ".rb") {
+		case strings.HasSuffix(name, ".rb"):
 			return "ruby"
+		case strings.HasSuffix(name, ".go"):
+			return "go"
 		}
 	}
 	return "unknown"
 }
 
-// GetModule returns a module by name
 func (mm *ModuleManager) GetModule(name string) (*ModuleConfig, error) {
-	module, exists := mm.Modules[name]
+	mod, exists := mm.Modules[name]
 	if !exists {
-		return nil, fmt.Errorf("module '%s' not found, did you forget to load it?", name)
+		return nil, fmt.Errorf("module %q not found – run DiscoverModules() first?", name)
 	}
-	if !module.Loaded {
-		return nil, fmt.Errorf("module '%s' failed to load: %s, did you forget to load it?", name, module.LoadError)
+	if !mod.Loaded {
+		if mod.LoadError != "" {
+			return nil, fmt.Errorf("module %q failed to load: %s", name, mod.LoadError)
+		}
+		return nil, fmt.Errorf("module %q was discovered but not properly loaded (no type/entrypoint?)", name)
 	}
-	return module, nil
+	return mod, nil
 }
 
-// ExecuteModule runs a module with given arguments
 func (mm *ModuleManager) ExecuteModule(moduleName string, args map[string]string) (*ExecutionResult, error) {
-	module, err := mm.GetModule(moduleName)
+	mod, err := mm.GetModule(moduleName)
 	if err != nil {
 		return nil, err
 	}
 
-	switch module.Type {
+	switch mod.Type {
 	case "python":
-		return executePythonModule(module, args)
+		return runScriptModule(mod, "python3", ".py", args)
 	case "bash":
-		return executeBashModule(module, args)
-	case "go":
-		return executeGoModule(module, args)
+		return runScriptModule(mod, "bash", ".sh", args)
 	case "ruby":
-		return executeRubyModule(module, args)
+		return runScriptModule(mod, "ruby", ".rb", args)
+	case "go":
+		return &ExecutionResult{
+			Timestamp: time.Now(),
+			Success:   false,
+			ExitCode:  1,
+			Error:     "automatic execution of Go modules is not implemented – please build and run manually",
+		}, nil
 	default:
-		return nil, fmt.Errorf("unsupported module type: %s, supported types are: python, bash, ruby", module.Type)
+		return nil, fmt.Errorf("unsupported module type %q for module %q (supported: python, bash, ruby)", mod.Type, moduleName)
 	}
 }
 
-// executePythonModule runs a Python module with real-time output
-func executePythonModule(module *ModuleConfig, args map[string]string) (*ExecutionResult, error) {
+// Unified runner for interpreted/script modules (python, bash, ruby)
+func runScriptModule(mod *ModuleConfig, interpreter, ext string, args map[string]string) (*ExecutionResult, error) {
 	result := &ExecutionResult{
 		Timestamp: time.Now(),
 	}
 
-	// Find the main Python script
-	scriptPath := findMainScript(module.Path, ".py")
-	if scriptPath == "" {
+	script := findMainScript(mod.Path, ext)
+	if script == "" {
 		result.Success = false
-		result.Error = "no Python script found in module, expected .py file, e.g., main.py or run.py"
-		result.ExitCode = 1
+		result.ExitCode = 127
+		result.Error = fmt.Sprintf("no main script found in %q (looking for main%s)", mod.Path, ext)
 		return result, nil
 	}
 
-	// Build command
-	cmd := exec.Command("python3", scriptPath)
-	cmd.Dir = module.Path
-
-	// Set environment variables for arguments
-	env := os.Environ()
-	for key, value := range args {
-		env = append(env, fmt.Sprintf("ARG_%s=%s", strings.ToUpper(key), value))
-	}
-	cmd.Env = env
-
-	// Stream output in real-time
+	cmd := exec.Command(interpreter, script)
+	cmd.Dir = mod.Path
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 
-	err := cmd.Run()
+	env := os.Environ()
+	for k, v := range args {
+		env = append(env, fmt.Sprintf("ARG_%s=%s", strings.ToUpper(k), v))
+	}
+	cmd.Env = env
 
+	err := cmd.Run()
 	if err != nil {
 		result.Success = false
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -219,153 +218,49 @@ func executePythonModule(module *ModuleConfig, args map[string]string) (*Executi
 		} else {
 			result.ExitCode = 1
 		}
-		result.Error = err.Error()
-	} else {
-		result.Success = true
-		result.ExitCode = 0
-	}
-
-	return result, nil
-}
-
-// executeBashModule runs a Bash script module with real-time output
-func executeBashModule(module *ModuleConfig, args map[string]string) (*ExecutionResult, error) {
-	result := &ExecutionResult{
-		Timestamp: time.Now(),
-	}
-
-	scriptPath := findMainScript(module.Path, ".sh")
-	if scriptPath == "" {
-		result.Success = false
-		result.Error = "no Bash script found in module"
-		result.ExitCode = 1
+		result.Error = fmt.Sprintf("%s exited with error: %v", interpreter, err)
 		return result, nil
 	}
 
-	cmd := exec.Command("bash", scriptPath)
-	cmd.Dir = module.Path
+	result.Success = true
+	result.ExitCode = 0
+	return result, nil
+}
 
-	// Set environment variables
-	env := os.Environ()
-	for key, value := range args {
-		env = append(env, fmt.Sprintf("ARG_%s=%s", strings.ToUpper(key), value))
-	}
-	cmd.Env = env
-
-	// Stream output in real-time
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	err := cmd.Run()
-
+func findMainScript(dir, ext string) string {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		result.Success = false
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-		} else {
-			result.ExitCode = 1
-		}
-		result.Error = err.Error()
-	} else {
-		result.Success = true
-		result.ExitCode = 0
+		return ""
 	}
 
-	return result, nil
-}
-
-// executeGoModule runs a Go module
-func executeGoModule(module *ModuleConfig, args map[string]string) (*ExecutionResult, error) {
-	result := &ExecutionResult{
-		Timestamp: time.Now(),
-		Success:   false,
-		Error:     "Go module execution not yet implemented, please build and run manually, thanks!",
-		ExitCode:  1,
-	}
-	return result, nil
-}
-
-// executeRubyModule runs a Ruby module with real-time output
-func executeRubyModule(module *ModuleConfig, args map[string]string) (*ExecutionResult, error) {
-	result := &ExecutionResult{
-		Timestamp: time.Now(),
-	}
-
-	scriptPath := findMainScript(module.Path, ".rb")
-	if scriptPath == "" {
-		result.Success = false
-		result.Error = "no Ruby script found in module, expected .rb file, e.g., main.rb or run.rb"
-		result.ExitCode = 1
-		return result, nil
-	}
-
-	cmd := exec.Command("ruby", scriptPath)
-	cmd.Dir = module.Path
-
-	// Set environment variables
-	env := os.Environ()
-	for key, value := range args {
-		env = append(env, fmt.Sprintf("ARG_%s=%s", strings.ToUpper(key), value))
-	}
-	cmd.Env = env
-
-	// Stream output in real-time
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	err := cmd.Run()
-
-	if err != nil {
-		result.Success = false
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-		} else {
-			result.ExitCode = 1
-		}
-		result.Error = err.Error()
-	} else {
-		result.Success = true
-		result.ExitCode = 0
-	}
-
-	return result, nil
-}
-
-// findMainScript finds the main script in a module directory
-func findMainScript(moduleDir string, extension string) string {
-	entries, _ := os.ReadDir(moduleDir)
-	for _, entry := range entries {
-		if !entry.IsDir() && entry.Name() == "main"+extension {
-			return filepath.Join(moduleDir, entry.Name())
+	for _, e := range entries {
+		if !e.IsDir() && e.Name() == "main"+ext {
+			return filepath.Join(dir, e.Name())
 		}
 	}
 	return ""
 }
 
-// loadMetadata loads module metadata from YAML file
 func loadMetadata(path string) (*ModuleMetadata, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot read module.yaml: %w", err)
 	}
 
-	var metadata ModuleMetadata
-	if err := yaml.Unmarshal(data, &metadata); err != nil {
-		return nil, err
+	var meta ModuleMetadata
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("cannot parse module.yaml: %w", err)
 	}
 
-	return &metadata, nil
+	return &meta, nil
 }
 
-// ListModules returns all loaded modules
 func (mm *ModuleManager) ListModules() []*ModuleConfig {
-	var modules []*ModuleConfig
-	for _, module := range mm.Modules {
-		if module.Loaded {
-			modules = append(modules, module)
+	loaded := make([]*ModuleConfig, 0, len(mm.Modules))
+	for _, mod := range mm.Modules {
+		if mod.Loaded {
+			loaded = append(loaded, mod)
 		}
 	}
-	return modules
+	return loaded
 }
